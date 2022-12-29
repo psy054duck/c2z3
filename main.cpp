@@ -207,13 +207,20 @@ std::vector<BBPath> pathsFromEntry2Exit(BasicBlock* entry, const LoopInfo &LI) {
     return res;
 }
 
+z3::expr_vector loopBasicBlock2z3(const BasicBlock* bb, const LoopInfo& LI) {
+    Loop* L = LI.getLoopFor(bb);
+    
+}
+
 z3::expr_vector loop2z3(BasicBlock* loopHeader, const LoopInfo& LI) {
     Loop* L = LI.getLoopFor(loopHeader);
     BasicBlock* preheader = L->getLoopPreheader();
     assert(preheader != nullptr);
     BasicBlock* latch = L->getLoopLatch();
     std::vector<BBPath> paths = pathsFromHeader2Latch(loopHeader, latch, L);
+    for (const BBPath &path : paths) {
 
+    }
 }
 
 void checkPath(const BBPath& path, const LoopInfo& LI) {
