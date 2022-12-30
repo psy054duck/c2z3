@@ -10,50 +10,49 @@ define dso_local i32 @main() #0 {
   %3 = alloca i32, align 4
   %4 = alloca i32, align 4
   %5 = alloca i32, align 4
+  %6 = alloca i32, align 4
   store i32 0, i32* %1, align 4
-  %6 = call i32 (...) @unknown1()
-  store i32 %6, i32* %2, align 4
-  %7 = call i32 (...) @unknown2()
-  store i32 %7, i32* %3, align 4
-  %8 = load i32, i32* %2, align 4
-  store i32 %8, i32* %4, align 4
-  %9 = load i32, i32* %3, align 4
-  store i32 %9, i32* %5, align 4
-  %10 = load i32, i32* %2, align 4
-  %11 = icmp sgt i32 %10, 0
-  br i1 %11, label %12, label %17
+  %7 = call i32 (...) @unknown1()
+  store i32 %7, i32* %2, align 4
+  %8 = call i32 (...) @unknown2()
+  store i32 %8, i32* %3, align 4
+  %9 = load i32, i32* %2, align 4
+  store i32 %9, i32* %4, align 4
+  %10 = load i32, i32* %3, align 4
+  store i32 %10, i32* %5, align 4
+  store i32 0, i32* %6, align 4
+  br label %11
 
-12:                                               ; preds = %0
-  %13 = load i32, i32* %3, align 4
-  %14 = add nsw i32 %13, 1
-  store i32 %14, i32* %3, align 4
+11:                                               ; preds = %19, %0
+  %12 = load i32, i32* %6, align 4
+  %13 = icmp slt i32 %12, 100
+  br i1 %13, label %14, label %22
+
+14:                                               ; preds = %11
   %15 = load i32, i32* %2, align 4
-  %16 = sub nsw i32 %15, 1
+  %16 = add nsw i32 %15, 1
   store i32 %16, i32* %2, align 4
-  br label %22
+  %17 = load i32, i32* %3, align 4
+  %18 = add nsw i32 %17, 2
+  store i32 %18, i32* %3, align 4
+  br label %19
 
-17:                                               ; preds = %0
-  %18 = load i32, i32* %3, align 4
-  %19 = sub nsw i32 %18, 1
-  store i32 %19, i32* %3, align 4
-  %20 = load i32, i32* %2, align 4
+19:                                               ; preds = %14
+  %20 = load i32, i32* %6, align 4
   %21 = add nsw i32 %20, 1
-  store i32 %21, i32* %2, align 4
-  br label %22
+  store i32 %21, i32* %6, align 4
+  br label %11, !llvm.loop !6
 
-22:                                               ; preds = %17, %12
+22:                                               ; preds = %11
   %23 = load i32, i32* %2, align 4
-  %24 = load i32, i32* %3, align 4
-  %25 = add nsw i32 %23, %24
-  %26 = load i32, i32* %4, align 4
-  %27 = load i32, i32* %5, align 4
-  %28 = add nsw i32 %26, %27
-  %29 = icmp eq i32 %25, %28
-  call void @assert(i1 noundef zeroext %29)
-  %30 = load i32, i32* %2, align 4
-  %31 = load i32, i32* %3, align 4
-  %32 = add nsw i32 %30, %31
-  ret i32 %32
+  %24 = load i32, i32* %4, align 4
+  %25 = add nsw i32 %24, 100
+  %26 = icmp eq i32 %23, %25
+  call void @assert(i1 noundef zeroext %26)
+  %27 = load i32, i32* %2, align 4
+  %28 = load i32, i32* %3, align 4
+  %29 = add nsw i32 %27, %28
+  ret i32 %29
 }
 
 declare i32 @unknown1(...) #1
@@ -74,3 +73,5 @@ attributes #1 = { "frame-pointer"="all" "no-trapping-math"="true" "stack-protect
 !3 = !{i32 7, !"uwtable", i32 1}
 !4 = !{i32 7, !"frame-pointer", i32 2}
 !5 = !{!"Ubuntu clang version 14.0.0-1ubuntu1"}
+!6 = distinct !{!6, !7}
+!7 = !{!"llvm.loop.mustprogress"}
