@@ -29,7 +29,8 @@ void abortWithInfo(const std::string &s) {
     abort();
 }
 
-z3::expr value2z3(const Value* v, z3::context &z3ctx) {
+// only works for Use
+z3::expr value2z3(const Value* v, unsigned depth, z3::context &z3ctx) {
     z3::expr res(z3ctx);
     if (auto CI = dyn_cast<ConstantInt>(v)) {
         if (CI->getBitWidth() == 1) {
@@ -39,8 +40,8 @@ z3::expr value2z3(const Value* v, z3::context &z3ctx) {
         }
     } else if (auto CI = dyn_cast<ICmpInst>(v)) {
         auto predicate = CI->getPredicate();
-        z3::expr op0 = value2z3(CI->getOperand(0), z3ctx);
-        z3::expr op1 = value2z3(CI->getOperand(1), z3ctx);
+        z3::expr op0 = value2z3(CI->getOperand(0), depth, z3ctx);
+        z3::expr op1 = value2z3(CI->getOperand(1), depth, z3ctx);
         if (ICmpInst::isLT(predicate)) {
             res = op0 < op1;
         } else if (ICmpInst::isGT(predicate)) {
@@ -88,9 +89,10 @@ z3::expr_vector basicBlock2z3(BasicBlock* BB, BasicBlock* parentBB, z3::expr_vec
         auto operands = I.getOperandList();
         auto opcode = I.getOpcode();
         z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
+        unsigned depth = BB->getloo
         if (opcode == Instruction::Add) {
             z3::expr lhs = z3ctx.int_const(I.getName().data());
-            cur_expr = (lhs == (value2z3(operands[0], z3ctx) + value2z3(operands[1], z3ctx)));
+            cur_expr = (lhs == (value2z3(operands[0], depth, z3ctx) + value2z3(operands[1], depth, z3ctx)));
             // res = res + I.getName().data() + " == " + value2str(operands[0], is_loop) + " + " + value2str(operands[1], is_loop) + "\n";
         } else if (opcode == Instruction::Sub) {
             z3::expr lhs = z3ctx.int_const(I.getName().data());
@@ -207,20 +209,23 @@ std::vector<BBPath> pathsFromEntry2Exit(BasicBlock* entry, const LoopInfo &LI) {
     return res;
 }
 
-z3::expr_vector loopBasicBlock2z3(const BasicBlock* bb, const LoopInfo& LI) {
+z3::expr_vector loopBasicBlock2z3(BasicBlock* bb, BasicBlock* parentBB, z3::expr_vector& assertions, const LoopInfo& LI, z3::context z3ctx) {
     Loop* L = LI.getLoopFor(bb);
-    
+    unsigned depth = LI.getLoopDepth(bb);
+    basicBlock2z3(bb, parentBB, assertions, z3ctx);
 }
 
-z3::expr_vector loop2z3(BasicBlock* loopHeader, const LoopInfo& LI) {
+z3::expr_vector loop2z3(BasicBlock* loopHeader, const LoopInfo& LI, z3::context z3ctx) {
     Loop* L = LI.getLoopFor(loopHeader);
     BasicBlock* preheader = L->getLoopPreheader();
     assert(preheader != nullptr);
     BasicBlock* latch = L->getLoopLatch();
     std::vector<BBPath> paths = pathsFromHeader2Latch(loopHeader, latch, L);
+    z3::expr_vector res(z3ctx);
     for (const BBPath &path : paths) {
 
     }
+    return res;
 }
 
 void checkPath(const BBPath& path, const LoopInfo& LI) {
