@@ -12,6 +12,7 @@
 #include "llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Passes/PassBuilder.h"
 
 #include "z3++.h"
@@ -30,18 +31,16 @@ void abortWithInfo(const std::string &s) {
 }
 
 // only works for Use
-z3::expr value2z3(const Value* v, unsigned depth, z3::context &z3ctx, bool is_used = true) {
+z3::expr value2z3(const Value* v, unsigned depth, z3::context &z3ctx, bool is_used = false) {
     z3::expr res(z3ctx);
     Type* vTy = v->getType();
     assert(vTy->isIntegerTy());
     bool isBoolTy = vTy->isIntegerTy(1);
     if (auto CI = dyn_cast<ConstantInt>(v)) {
-        if (is_used) {
-            if (isBoolTy) {
-                res = z3ctx.bool_val(*CI->getValue().getRawData() != 0);
-            } else {
-                res = z3ctx.int_val(*CI->getValue().getRawData());
-            }
+        if (isBoolTy) {
+            res = z3ctx.bool_val(*CI->getValue().getRawData() != 0);
+        } else {
+            res = z3ctx.int_val(*CI->getValue().getRawData());
         }
     } else if (auto CI = dyn_cast<ICmpInst>(v)) {
         if (is_used) {
@@ -61,7 +60,7 @@ z3::expr value2z3(const Value* v, unsigned depth, z3::context &z3ctx, bool is_us
             }
         }
     }
-    if (!is_used || res.to_string() == "null") {
+    if ((!is_used && !isa<ConstantInt>(v)) || res.to_string() == "null") {
         assert(v->hasName());
         z3::sort rangeSort(z3ctx);
         z3::sort domainSort = z3ctx.int_sort();
@@ -260,11 +259,13 @@ z3::expr_vector loopBasicBlock2z3(BasicBlock* bb, z3::expr_vector& assertions, c
         // z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
         z3::expr_vector cur_expr_list(z3ctx);
         if (opcode == Instruction::Add) {
-            z3::expr lhs = z3ctx.int_const(I.getName().data());
+            z3::expr lhs = value2z3(&I, depth, z3ctx, false);
+            // z3::expr lhs = z3ctx.int_const(I.getName().data());
             cur_expr_list.push_back(lhs == (value2z3(operands[0], depth, z3ctx) + value2z3(operands[1], depth, z3ctx)));
             // res = res + I.getName().data() + " == " + value2str(operands[0], is_loop) + " + " + value2str(operands[1], is_loop) + "\n";
         } else if (opcode == Instruction::Sub) {
-            z3::expr lhs = z3ctx.int_const(I.getName().data());
+            // z3::expr lhs = z3ctx.int_const(I.getName().data());
+            z3::expr lhs = value2z3(&I, depth, z3ctx, false);
             cur_expr_list.push_back(lhs == (value2z3(operands[0], depth, z3ctx) - value2z3(operands[1], depth, z3ctx)));
         } else if (opcode == Instruction::Select) {
             auto &pred = operands[0];
@@ -343,6 +344,7 @@ z3::expr_vector loopBasicBlock2z3(BasicBlock* bb, z3::expr_vector& assertions, c
                 // errs() << "\t\t" << rhs.to_string() << "\n";
                 
                 cur_expr_list.push_back(z3::forall(idx_list, z3::implies(cond, lhs == rhs)));
+                // errs() << z3::implies(cond, lhs == rhs).to_string() << "\n";
             }
         }
         for (auto e : cur_expr_list) expr_list.push_back(e);
@@ -367,8 +369,29 @@ z3::expr_vector loop2z3(Loop* L, const LoopInfo& LI, z3::context& z3ctx) {
         for (z3::expr e : localAxioms) res.push_back(e);
     }
     z3::expr N = z3ctx.int_const("N");
-
-
+    res.push_back(N >= 0);
+    SmallVector<Loop::Edge> ExitEdges;
+    L->getExitEdges(ExitEdges);
+    z3::expr exitCondition(z3ctx, z3ctx.bool_val(false));
+    for (auto& edge : ExitEdges) {
+        Instruction* terminator = edge.first->getTerminator();
+        BranchInst* br = dyn_cast<BranchInst>(terminator);
+        assert(br->isConditional());
+        z3::expr cur_expr(z3ctx);
+        if (edge.second == br->getSuccessor(0)) {
+            cur_expr = value2z3(br->getCondition(), L->getLoopDepth(), z3ctx);
+        } else {
+            cur_expr = !value2z3(br->getCondition(), L->getLoopDepth(), z3ctx);
+        }
+        exitCondition = exitCondition || cur_expr;
+    }
+    z3::expr n = z3ctx.int_const("n0");
+    z3::expr_vector bnd_vars(z3ctx);
+    z3::expr_vector N_vars(z3ctx);
+    bnd_vars.push_back(n);
+    N_vars.push_back(N);
+    res.push_back(z3::forall(bnd_vars, z3::implies(n < N && n >= 0, !exitCondition)));
+    res.push_back(exitCondition.substitute(bnd_vars, N_vars));
     return res;
 }
 
@@ -401,7 +424,7 @@ void checkPath(const BBPath& path, const LoopInfo& LI) {
         for (auto a : assertions) {
             s.add(!a);
         }
-        // errs() << s.to_smt2() << "\n";
+        errs() << s.to_smt2() << "\n";
         switch (s.check()) {
             case z3::sat:   errs() << "Wrong\n";   break;
             case z3::unsat: errs() << "Correct\n"; break;
