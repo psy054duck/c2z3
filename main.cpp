@@ -283,7 +283,18 @@ z3::expr_vector loopBasicBlock2z3(BasicBlock* bb, z3::expr_vector& assertions, c
                 abortWithInfo("The first operand of Select is not ICmpInst");
             }
         } else if (opcode == Instruction::ICmp) {
-            cur_expr_list.push_back(z3ctx.bool_const(I.getName().data()) == value2z3(&I, depth, z3ctx));
+            // cur_expr_list.push_back(z3ctx.bool_const(I.getName().data()) == value2z3(&I, depth, z3ctx));
+            if (auto cmpStmt = dyn_cast<ICmpInst>(&I)) {
+                z3::expr op0 = value2z3(cmpStmt->getOperand(0), depth, z3ctx, true);
+                z3::expr op1 = value2z3(cmpStmt->getOperand(1), depth, z3ctx, true);
+                z3::expr predicate = value2z3(cmpStmt, depth, z3ctx);
+                auto p = cmpStmt->getPredicate();
+                if (ICmpInst::isEquality(p)) {
+                    cur_expr_list.push_back(predicate == (op0 == op1));
+                } else {
+
+                }
+            }
         } else if (opcode == Instruction::Call) {
             auto callStmt = dyn_cast<CallInst>(&I);
             Function* calledFunction = callStmt->getCalledFunction();
@@ -410,16 +421,17 @@ void checkPath(const BBPath& path, const LoopInfo& LI) {
             z3::expr_vector localAxioms = loop2z3(L, LI, z3ctx);
             // z3::expr_vector localAxioms = loopBasicBlock2z3(BB, parentBB, assertions, LI, z3ctx);
             for (auto expr : localAxioms) {
-                axioms.push_back(expr);
+                axioms.push_back(expr.simplify());
                 // errs() << expr.to_string() << "\n";
             }
+            parentBB = nullptr;
         } else {
             z3::expr_vector localAxioms = basicBlock2z3(BB, parentBB, assertions, z3ctx);
             for (auto expr : localAxioms) {
-                axioms.push_back(expr);
+                axioms.push_back(expr.simplify());
             }
+            parentBB = BB;
         }
-        parentBB = BB;
     }
     if (!assertions.empty()) {
         z3::solver s(z3ctx);
