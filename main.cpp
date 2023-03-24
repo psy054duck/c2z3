@@ -104,7 +104,6 @@ z3::expr_vector basicBlock2z3(BasicBlock* BB, BasicBlock* parentBB, z3::expr_vec
                 expr_list.push_back(!cond_z3);
             }
         }
-
     }
     for (auto &I : *BB) {
         auto operands = I.getOperandList();
@@ -112,12 +111,15 @@ z3::expr_vector basicBlock2z3(BasicBlock* BB, BasicBlock* parentBB, z3::expr_vec
         z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
         unsigned depth = 0;
         if (opcode == Instruction::Add) {
+            // errs() << "Add\n";
             z3::expr lhs = z3ctx.int_const(I.getName().data());
             cur_expr = (lhs == (value2z3(operands[0], depth, z3ctx) + value2z3(operands[1], depth, z3ctx)));
         } else if (opcode == Instruction::Sub) {
+            // errs() << "Sub\n";
             z3::expr lhs = z3ctx.int_const(I.getName().data());
             cur_expr = (lhs == (value2z3(operands[0], depth, z3ctx) - value2z3(operands[1], depth, z3ctx)));
         } else if (opcode == Instruction::Select) {
+            // errs() << "Select\n";
             auto &pred = operands[0];
             if (auto cmpStmt = dyn_cast<ICmpInst>(pred)) {
                 z3::expr op0 = value2z3(cmpStmt->getOperand(0), depth, z3ctx);
@@ -135,6 +137,7 @@ z3::expr_vector basicBlock2z3(BasicBlock* BB, BasicBlock* parentBB, z3::expr_vec
                 abortWithInfo("The first operand of Select is not ICmpInst");
             }
         } else if (opcode == Instruction::ICmp) {
+            // errs() << "ICmp\n";
             cur_expr = (z3ctx.bool_const(I.getName().data()) == value2z3(&I, depth, z3ctx));
         } else if (opcode == Instruction::Call) {
             auto callStmt = dyn_cast<CallInst>(&I);
@@ -147,6 +150,7 @@ z3::expr_vector basicBlock2z3(BasicBlock* BB, BasicBlock* parentBB, z3::expr_vec
                 cur_expr = z3ctx.int_const(I.getName().data()) == z3ctx.int_const(funcName.data());
             }
         } else if (opcode == Instruction::PHI) {
+            // errs() << "PHI\n";
             int width = dyn_cast<IntegerType>(operands[1]->getType())->getBitWidth();
             z3::expr lhs = value2z3(&I, depth, z3ctx, false);
             auto phi = dyn_cast<PHINode>(&I);

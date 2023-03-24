@@ -1,0 +1,1 @@
+clang++ main.cpp libz3.dylib `llvm-config --cxxflags --ldflags --system-libs --libs all`  -I/opt/homebrew/Cellar/z3/4.11.2_1/include

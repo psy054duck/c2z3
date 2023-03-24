@@ -1,6 +1,6 @@
 #include <stdbool.h>
-extern int unknown1();
-extern int unknown2();
+extern int unknown1(void);
+extern int unknown2(void);
 extern void assert(bool);
 
 int main() {
