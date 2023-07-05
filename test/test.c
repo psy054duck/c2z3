@@ -25,6 +25,7 @@ int main() {
     // } else {
     //     x--;
     // }
+    // assert(x + y == x0 + y0 + 1 || x + y == x0 + y0 - 1);
     // while (i < 10000) {
     //     if (x < 5000) {
     //         x = x + 1;
