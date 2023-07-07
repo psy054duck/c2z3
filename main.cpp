@@ -6,6 +6,7 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
+#include "llvm/Transforms/Utils/LCSSA.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
 #include "llvm/Transforms/Utils/InstructionNamer.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
@@ -31,60 +32,101 @@ void abortWithInfo(const std::string &s) {
     abort();
 }
 
+void combine_vec(z3::expr_vector& vec1, const z3::expr_vector& vec2) {
+    for (z3::expr e : vec2) {
+        vec1.push_back(e);
+    }
+}
+
 // only works for Use
-z3::expr use2z3(const Use* u, const LoopInfo& LI, z3::context &z3ctx) {
+z3::expr use2z3(const Use& u, const LoopInfo& LI, z3::context &z3ctx, bool from_latch = false) {
     z3::expr res(z3ctx);
-    const Value* v = u->get();
+    const Value* v = u.get();
+    const User* user = u.getUser();
+    const Instruction* userInst = dyn_cast<Instruction>(user);
+    const BasicBlock* userBB = userInst->getParent();
     Type* vTy = v->getType();
-    assert(vTy->isIntegerTy());
-    bool isBoolTy = vTy->isIntegerTy(1);
+
     if (auto CI = dyn_cast<ConstantInt>(v)) {
+        bool isBoolTy = vTy->isIntegerTy(1);
+        if (isBoolTy) {
+            res = z3ctx.bool_val(*CI->getValue().getRawData() != 0);
+        } else {
+            res = z3ctx.int_val(CI->getSExtValue());
+        }
+    // } else if (auto CI = dyn_cast<ICmpInst>(v)) {
+    } else {
+        z3::expr_vector args(z3ctx);
+        z3::sort_vector sorts(z3ctx);
+        int userDepth = LI.getLoopDepth(userBB);
+        const Instruction* defInst = dyn_cast<Instruction>(v);
+        const BasicBlock* defBB = defInst->getParent();
+        int defDepth = LI.getLoopDepth(defBB);
+        for (int i = 0; i < defDepth - 1; i++) {
+            sorts.push_back(z3ctx.int_sort());
+            std::string idx = std::string("n") + std::to_string(i);
+            args.push_back(z3ctx.int_const(idx.data()));
+        }
+
+        if (defDepth > 0) {
+            sorts.push_back(z3ctx.int_sort());
+            std::string idx = std::string("n") + std::to_string(defDepth - 1);
+            if (userDepth < defDepth) {
+                idx = std::string("N") + std::to_string(defDepth - 1);
+                args.push_back(z3ctx.int_const(idx.data()));
+            } else {
+                if (from_latch) {
+                    args.push_back(z3ctx.int_const(idx.data()));
+                } else {
+                    args.push_back(z3ctx.int_const(idx.data()) + 1);
+                }
+            }
+        }
+        bool isBoolTy = vTy->isIntegerTy(1);
+        z3::sort ret_sort = isBoolTy ? z3ctx.bool_sort() : z3ctx.int_sort();
+        z3::func_decl func_sig = z3ctx.function(v->getName().data(), sorts, ret_sort);
+        res = func_sig(args);
+    }
+    return res;
+}
+
+z3::expr def2z3(const Value* v, const LoopInfo& LI, z3::context &z3ctx) {
+    z3::expr res(z3ctx);
+    Type* vTy = v->getType();
+    const Instruction* inst = dyn_cast<Instruction>(v);
+    const BasicBlock* bb = inst->getParent();
+    int depth = LI.getLoopDepth(bb);
+    z3::sort_vector sorts(z3ctx);
+    z3::expr_vector args(z3ctx);
+    for (int i = 0; i < depth - 1; i++) {
+        sorts.push_back(z3ctx.int_sort());
+        std::string idx = std::string("n") + std::to_string(i);
+        args.push_back(z3ctx.int_const(idx.data()));
+    }
+    if (depth > 0) {
+        sorts.push_back(z3ctx.int_sort());
+        std::string idx = std::string("n") + std::to_string(depth - 1);
+        args.push_back(z3ctx.int_const(idx.data()) + 1);
+    }
+    if (auto CI = dyn_cast<ConstantInt>(v)) {
+        bool isBoolTy = vTy->isIntegerTy(1);
         if (isBoolTy) {
             res = z3ctx.bool_val(*CI->getValue().getRawData() != 0);
         } else {
             res = z3ctx.int_val(CI->getSExtValue());
         }
     } else if (auto CI = dyn_cast<ICmpInst>(v)) {
-        res = 
-        // auto predicate = CI->getPredicate();
-        // z3::expr op0 = value2z3(CI->getOperand(0), LI, z3ctx);
-        // z3::expr op1 = value2z3(CI->getOperand(1), LI, z3ctx);
-        // if (ICmpInst::isLT(predicate)) {
-        //     res = op0 < op1;
-        // } else if (ICmpInst::isGT(predicate)) {
-        //     res = op0 > op1;
-        // } else if (ICmpInst::isGE(predicate)) {
-        //     res = op0 >= op1;
-        // } else if (ICmpInst::isLE(predicate)) {
-        //     res = op0 <= op1;
-        // } else if (ICmpInst::isEquality(predicate)) {
-        //     res = (op0 == op1);
+        res = z3ctx.bool_const(v->getName().data());
+    } else {
+        bool isBoolTy = vTy->isIntegerTy(1);
+        z3::sort ret_sort = isBoolTy ? z3ctx.bool_sort() : z3ctx.int_sort();
+        z3::func_decl func_sig = z3ctx.function(v->getName().data(), sorts, ret_sort);
+        res = func_sig(args);
+        // if (isBoolTy) {
+        //     res = z3ctx.bool_const(v->getName().data());
+        // } else {
+        //     res = z3ctx.int_const(v->getName().data());
         // }
-    }
-    if ((!is_used && !isa<ConstantInt>(v)) || res.to_string() == "null") {
-        assert(v->hasName());
-        auto CI = dyn_cast<Instruction>(v);
-        const BasicBlock* parentBB = CI->getParent();
-        unsigned depth = LI.getLoopDepth(parentBB);
-        z3::sort rangeSort(z3ctx);
-        z3::sort domainSort = z3ctx.int_sort();
-        z3::sort_vector domainVec(z3ctx);
-        if (isBoolTy) {
-            rangeSort = z3ctx.bool_sort();
-        } else {
-            rangeSort = z3ctx.int_sort();
-        }
-        z3::expr_vector idx_list(z3ctx);
-        for (int i = 0; i < depth; i++) {
-            domainVec.push_back(domainSort);
-            if (is_used) {
-                idx_list.push_back(z3ctx.int_const((std::string("n") + std::to_string(i)).c_str()));
-            } else {
-                idx_list.push_back(z3ctx.int_const((std::string("n") + std::to_string(i)).c_str()) + 1);
-            }
-        }
-        z3::func_decl func_decl = z3ctx.function(v->getName().data(), domainVec, rangeSort);
-        res = func_decl(idx_list);
     }
     return res;
 }
@@ -456,23 +498,25 @@ void checkPath(const BBPath& path, const LoopInfo& LI) {
 }
 */
 
-z3::expr_vector bb2z3(const BasicBlock* bb, z3::expr_vector& assertions, const LoopInfo& LI, z3::context& z3ctx) {
+z3::expr_vector bb2z3(const BasicBlock* bb, std::vector<Value*>& assertions, const LoopInfo& LI, z3::context& z3ctx) {
     z3::expr_vector expr_v(z3ctx);
     for (const auto& I : *bb) {
         auto opcode = I.getOpcode();
         z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
-        z3::expr lhs(z3ctx);
-        if (I.getType()->isIntegerTy()) {
-            if (I.getType()->isIntegerTy(1)) {
-                lhs = z3ctx.bool_const(I.getName().data());
-            } else {
-                lhs = z3ctx.int_const(I.getName().data());
-            }
-        }
+        // z3::expr lhs(z3ctx);
+        // if (I.getType()->isIntegerTy()) {
+        //     lhs = def2z3(&I, LI, z3ctx);
+        //     // if (I.getType()->isIntegerTy(1)) {
+        //     //     lhs = z3ctx.bool_const(I.getName().data());
+        //     // } else {
+        //     //     lhs = z3ctx.int_const(I.getName().data());
+        //     // }
+        // }
         if (I.isBinaryOp()) {
-            z3::expr lhs = z3ctx.int_const(I.getName().data());
-            z3::expr operand0 = value2z3(I.getOperandUse(0), LI, z3ctx, true);
-            z3::expr operand1 = value2z3(I.getOperandUse(1), LI, z3ctx, true);
+            // z3::expr lhs = z3ctx.int_const(I.getName().data());
+            z3::expr lhs = def2z3(&I, LI, z3ctx);
+            z3::expr operand0 = use2z3(I.getOperandUse(0), LI, z3ctx);
+            z3::expr operand1 = use2z3(I.getOperandUse(1), LI, z3ctx);
             if (opcode == Instruction::Add) {
                 cur_expr = (lhs == operand0 + operand1);
             } else if (opcode == Instruction::Sub) {
@@ -481,13 +525,15 @@ z3::expr_vector bb2z3(const BasicBlock* bb, z3::expr_vector& assertions, const L
                 cur_expr = (lhs == operand0 * operand1);
             }
         } else if (opcode == Instruction::Select) {
+            z3::expr lhs = def2z3(&I, LI, z3ctx);
             z3::expr pred = z3ctx.bool_const(I.getOperand(0)->getName().data());
-            z3::expr true_v = value2z3(I.getOperand(1), LI, z3ctx, true);
-            z3::expr false_v = value2z3(I.getOperand(2), LI, z3ctx, true);
+            z3::expr true_v = use2z3(I.getOperandUse(1), LI, z3ctx);
+            z3::expr false_v = use2z3(I.getOperandUse(2), LI, z3ctx);
             cur_expr = (lhs == z3::ite(pred, true_v, false_v));
         } else if (opcode == Instruction::ICmp) {
-            z3::expr operand0 = value2z3(I.getOperand(0), LI, z3ctx);
-            z3::expr operand1 = value2z3(I.getOperand(1), LI, z3ctx);
+            z3::expr lhs = def2z3(&I, LI, z3ctx);
+            z3::expr operand0 = use2z3(I.getOperandUse(0), LI, z3ctx);
+            z3::expr operand1 = use2z3(I.getOperandUse(1), LI, z3ctx);
             if (auto ci = dyn_cast<ICmpInst>(&I)) {
                 auto pred = ci->getPredicate();
                 if (ICmpInst::isLT(pred)) {
@@ -508,8 +554,9 @@ z3::expr_vector bb2z3(const BasicBlock* bb, z3::expr_vector& assertions, const L
             StringRef funcName = calledFunction->getName();
             if (funcName.endswith("assert")) {
                 assert(callStmt->arg_size() == 1);
-                z3::expr ass = z3ctx.bool_const(callStmt->getArgOperand(0)->getName().data());
-                assertions.push_back(ass);
+                assertions.push_back(callStmt->getArgOperand(0));
+                // z3::expr ass = z3ctx.bool_const(callStmt->getArgOperand(0)->getName().data());
+                // assertions.push_back(ass);
             }
         }
         if (!cur_expr.is_true()) {
@@ -519,10 +566,150 @@ z3::expr_vector bb2z3(const BasicBlock* bb, z3::expr_vector& assertions, const L
     return expr_v;
 }
 
-int main() {
+std::vector<const Use*> collectAllAssertions(Function& f) {
+    std::vector<const Use*> assertions;
+    for (const auto& bb : f) {
+        for (const auto& inst : bb) {
+            unsigned opcode = inst.getOpcode();
+            if (opcode == Instruction::Call) {
+                auto callStmt = dyn_cast<CallInst>(&inst);
+                Function* calledFunction = callStmt->getCalledFunction();
+                StringRef funcName = calledFunction->getName();
+                if (funcName.endswith("assert")) {
+                    assertions.push_back(&callStmt->getArgOperandUse(0));
+                }
+            }
+        }
+    }
+    return assertions;
+}
+
+z3::expr inst2z3(const Instruction* inst, const LoopInfo& LI, z3::context& z3ctx) {
+    // errs() << *inst << "\n";
+    auto opcode = inst->getOpcode();
+    z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
+    static int call_index = 0;
+    if (inst->isBinaryOp()) {
+        z3::expr lhs = def2z3(inst, LI, z3ctx);
+        z3::expr operand0 = use2z3(inst->getOperandUse(0), LI, z3ctx);
+        z3::expr operand1 = use2z3(inst->getOperandUse(1), LI, z3ctx);
+        if (opcode == Instruction::Add) {
+            cur_expr = (lhs == operand0 + operand1);
+        } else if (opcode == Instruction::Sub) {
+            cur_expr = (lhs == operand0 - operand1);
+        } else if (opcode == Instruction::Mul) {
+            cur_expr = (lhs == operand0 * operand1);
+        }
+    } else if (opcode == Instruction::Select) {
+        z3::expr lhs = def2z3(inst, LI, z3ctx);
+        z3::expr pred = z3ctx.bool_const(inst->getOperand(0)->getName().data());
+        z3::expr true_v = use2z3(inst->getOperandUse(1), LI, z3ctx);
+        z3::expr false_v = use2z3(inst->getOperandUse(2), LI, z3ctx);
+        cur_expr = (lhs == z3::ite(pred, true_v, false_v));
+    } else if (opcode == Instruction::ICmp) {
+        z3::expr lhs = def2z3(inst, LI, z3ctx);
+        z3::expr operand0 = use2z3(inst->getOperandUse(0), LI, z3ctx);
+        z3::expr operand1 = use2z3(inst->getOperandUse(1), LI, z3ctx);
+        if (auto ci = dyn_cast<ICmpInst>(inst)) {
+            auto pred = ci->getPredicate();
+            if (ICmpInst::isLT(pred)) {
+                cur_expr = (lhs == operand0 < operand1);
+            } else if (ICmpInst::isLE(pred)) {
+                cur_expr = (lhs == operand0 <= operand1);
+            } else if (ICmpInst::isGT(pred)) {
+                cur_expr = (lhs == operand0 > operand1);
+            } else if (ICmpInst::isGE(pred)) {
+                cur_expr = (lhs == operand0 >= operand1);
+            } else if (ICmpInst::isEquality(pred)) {
+                cur_expr = (lhs == (operand0 == operand1));
+            }
+        }
+    } else if (opcode == Instruction::PHI) {
+        assert(inst->getType()->isIntegerTy());
+        const PHINode* PN = dyn_cast<PHINode>(inst);
+        const BasicBlock* bb = inst->getParent();
+        int depth = LI.getLoopDepth(bb);
+        z3::sort_vector sorts(z3ctx);
+        z3::expr_vector args_0(z3ctx);
+        z3::expr_vector args_N(z3ctx);
+        z3::expr_vector args_n_1(z3ctx);
+        for (int i = 0; i < depth - 1; i++) {
+            std::string idx = std::string("n") + std::to_string(i);
+            sorts.push_back(z3ctx.int_sort());
+            args_0.push_back(z3ctx.int_const(idx.data()));
+            args_N.push_back(z3ctx.int_const(idx.data()));
+            args_n_1.push_back(z3ctx.int_const(idx.data()));
+        }
+        if (depth > 0) {
+            sorts.push_back(z3ctx.int_sort());
+            args_0.push_back(z3ctx.int_val(0));
+            std::string N = std::string("N") + std::to_string(depth - 1);
+            args_N.push_back(z3ctx.int_const(N.data()));
+            std::string idx = std::string("n") + std::to_string(depth - 1);
+            args_n_1.push_back(z3ctx.int_const(idx.data()) + 1);
+        }
+        z3::func_decl func_sig = z3::function(inst->getName().data(), sorts, z3ctx.int_sort());
+        for (int i = 0; i < PN->getNumIncomingValues(); i++) {
+            const Use& incoming_u = PN->getOperandUse(i);
+            const BasicBlock* incoming_b = PN->getIncomingBlock(i);
+            if (depth > LI.getLoopDepth(incoming_b)) {
+                cur_expr = (func_sig(args_0) == use2z3(incoming_u, LI, z3ctx));
+            } else if (depth == LI.getLoopDepth(incoming_b)) {
+                const Loop* someLoop = LI.getLoopFor(incoming_b);
+                bool from_latch = someLoop->isLoopLatch(incoming_b);
+                cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx, from_latch));
+            } else {
+                cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
+            }
+        }
+    }
+    return cur_expr;
+}
+
+z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const LoopInfo& LI, z3::context& z3ctx) {
+    z3::expr_vector res(z3ctx);
+    errs() << v->getName() << "\n";
+    if (std::find(visited.begin(), visited.end(), v) != visited.end()) {
+        return res;
+    }
+    visited.push_back(v);
+    if (auto inst = dyn_cast<Instruction>(v) ) {
+        unsigned opcode = inst->getOpcode();
+        if (opcode == Instruction::Call) {
+            return res;
+        }
+        z3::expr cur_expr = inst2z3(inst, LI, z3ctx);
+        res.push_back(cur_expr);
+        for (const Use& u : inst->operands()) {
+            const Value* operand_v = u.get();
+            z3::expr_vector operand_expr_vec = rel2z3(operand_v, visited, LI, z3ctx);
+            combine_vec(res, operand_expr_vec);
+        }
+    }
+    return res;
+}
+
+void check_assertion(const Use* u, const LoopInfo& LI) {
+    // const Instruction* defInst = dyn_cast<const Instruction>(v);
+    z3::context z3ctx;
+    z3::solver solver(z3ctx);
+    solver.add(!use2z3(*u, LI, z3ctx));
+    Value* v = u->get();
+    std::vector<const Value*> visited;
+    z3::expr_vector all_z3 = rel2z3(v, visited, LI, z3ctx);
+    solver.add(all_z3);
+    errs() << solver.to_smt2();
+    switch (solver.check()) {
+        case z3::sat: errs() << "Wrong\n"; break;
+        case z3::unsat: errs() << "Correct\n"; break;
+        default: errs() << "Unknown\n"; break;
+    }
+}
+
+int main(int argc, char** argv) {
     LLVMContext ctx;
     SMDiagnostic Err;
-    std::unique_ptr<Module> mod(parseIRFile("test/test.ll", Err, ctx));
+    std::unique_ptr<Module> mod(parseIRFile(argv[1], Err, ctx));
 
     PassBuilder PB;
     LoopAnalysisManager LAM;
@@ -539,6 +726,7 @@ int main() {
 
     ModulePassManager MPM;
     MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(LCSSAPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(SimplifyCFGPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(LoopSimplifyPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(InstructionNamerPass()));
@@ -553,23 +741,27 @@ int main() {
             auto &fam = MAM.getResult<FunctionAnalysisManagerModuleProxy>(*mod).getManager();
             LoopInfo &LI = fam.getResult<LoopAnalysis>(*F);
     //         // std::vector<BBPath> allPaths = pathsFromEntry2Exit(&F->getEntryBlock(), LI);
-            z3::expr_vector assertions(z3ctx);
-            z3::solver solver(z3ctx);
-            for (const auto &bb : *F) {
-                z3::expr_vector bbz3 = bb2z3(&bb, assertions, LI, z3ctx);
-                solver.add(bbz3);
+            // z3::expr_vector assertions(z3ctx);
+            std::vector<const Use*> assertions = collectAllAssertions(*F);
+            for (auto a : assertions) {
+                check_assertion(a, LI);
             }
-            for (const auto& a : assertions) {
-                solver.push();
-                solver.add(!a);
-                switch (solver.check()) {
-                    case z3::sat: errs() << "Wrong\n"; break;
-                    case z3::unsat: errs() << "Correct\n"; break;
-                    default: errs() << "Unknown\n"; break;
-                }
-                solver.pop();
-            }
-            errs() << solver.to_smt2() << "\n";
+            // z3::solver solver(z3ctx);
+            // for (const auto &bb : *F) {
+            //     z3::expr_vector bbz3 = bb2z3(&bb, assertions, LI, z3ctx);
+            //     solver.add(bbz3);
+            // }
+            // for (const auto& a : assertions) {
+            //     solver.push();
+            //     solver.add(!a);
+            //     switch (solver.check()) {
+            //         case z3::sat: errs() << "Wrong\n"; break;
+            //         case z3::unsat: errs() << "Correct\n"; break;
+            //         default: errs() << "Unknown\n"; break;
+            //     }
+            //     solver.pop();
+            // }
+            // errs() << solver.to_smt2() << "\n";
         }
     }
 }

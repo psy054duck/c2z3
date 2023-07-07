@@ -15,6 +15,7 @@ int main() {
     //     y = y - 1;
     //     x = x + 1;
     // }
+    // assert(x + y == x0 + y0);
     for (int i = 0; i < 100; i++) {
         x++;
         y += 2;
