@@ -25,7 +25,7 @@ define i32 @main() #0 {
 
 11:                                               ; preds = %19, %0
   %12 = load i32, ptr %6, align 4
-  %13 = icmp slt i32 %12, 100
+  %13 = icmp slt i32 %12, 1
   br i1 %13, label %14, label %22
 
 14:                                               ; preds = %11
@@ -44,15 +44,19 @@ define i32 @main() #0 {
   br label %11, !llvm.loop !5
 
 22:                                               ; preds = %11
-  %23 = load i32, ptr %2, align 4
-  %24 = load i32, ptr %4, align 4
-  %25 = add nsw i32 %24, 100
-  %26 = icmp eq i32 %23, %25
-  call void @assert(i1 noundef zeroext %26)
-  %27 = load i32, ptr %2, align 4
-  %28 = load i32, ptr %3, align 4
-  %29 = add nsw i32 %27, %28
-  ret i32 %29
+  %23 = load i32, ptr %3, align 4
+  %24 = load i32, ptr %2, align 4
+  %25 = add nsw i32 %23, %24
+  %26 = load i32, ptr %4, align 4
+  %27 = load i32, ptr %5, align 4
+  %28 = add nsw i32 %26, %27
+  %29 = add nsw i32 %28, 3
+  %30 = icmp eq i32 %25, %29
+  call void @assert(i1 noundef zeroext %30)
+  %31 = load i32, ptr %2, align 4
+  %32 = load i32, ptr %3, align 4
+  %33 = add nsw i32 %31, %32
+  ret i32 %33
 }
 
 declare i32 @unknown1() #1
