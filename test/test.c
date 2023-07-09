@@ -16,12 +16,12 @@ int main() {
     //     x = x + 1;
     // }
     // assert(x + y == x0 + y0);
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < x0; i++) {
         x++;
         y += 2;
     }
-    // assert(x == x0 + 1);
-    assert(y + x == x0 + y0 + 3);
+    assert(x == 2*x0 || x0 < 0);
+    // assert(y + x == x0 + y0 + 3);
     // if (x < 0) {
     //     x++;
     // } else {

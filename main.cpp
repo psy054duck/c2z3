@@ -406,6 +406,8 @@ void check_assertion(const Use* u, const LoopInfo& LI) {
     // const Instruction* defInst = dyn_cast<const Instruction>(v);
     z3::context z3ctx;
     z3::solver solver(z3ctx);
+    // solver.add(z3ctx.int_const("N0") == z3ctx.int_const("%i") || z3ctx.int_const("%i") < 0);
+    // solver.add(z3ctx.int_const("N0") == 0);
     solver.add(!use2z3(*u, LI, z3ctx));
     Value* v = u->get();
     std::vector<const Value*> visited;
