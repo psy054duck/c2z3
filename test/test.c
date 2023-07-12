@@ -4,7 +4,7 @@ extern int unknown2(void);
 extern void assert(bool);
 
 int main() {
-    int x = unknown1();
+    int x = -1;
     int y = unknown2();
     int x0 = x;
     int y0 = y;
@@ -16,11 +16,14 @@ int main() {
     //     x = x + 1;
     // }
     // assert(x + y == x0 + y0);
-    for (int i = 0; i < x0; i++) {
-        x++;
-        y += 2;
+    if (x0 > 0) {
+        for (int i = 0; i < x0; i++) {
+            x++;
+            y += 2;
+        }
+        // assert(x == x0 + x0);
     }
-    assert(x == 2*x0 || x0 < 0);
+    assert(x == -1);
     // assert(y + x == x0 + y0 + 3);
     // if (x < 0) {
     //     x++;

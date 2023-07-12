@@ -12,60 +12,54 @@ define i32 @main() #0 {
   %5 = alloca i32, align 4
   %6 = alloca i32, align 4
   store i32 0, ptr %1, align 4
-  %7 = call i32 @unknown1()
-  store i32 %7, ptr %2, align 4
-  %8 = call i32 @unknown2()
-  store i32 %8, ptr %3, align 4
-  %9 = load i32, ptr %2, align 4
-  store i32 %9, ptr %4, align 4
-  %10 = load i32, ptr %3, align 4
-  store i32 %10, ptr %5, align 4
+  store i32 -1, ptr %2, align 4
+  %7 = call i32 @unknown2()
+  store i32 %7, ptr %3, align 4
+  %8 = load i32, ptr %2, align 4
+  store i32 %8, ptr %4, align 4
+  %9 = load i32, ptr %3, align 4
+  store i32 %9, ptr %5, align 4
+  %10 = load i32, ptr %4, align 4
+  %11 = icmp sgt i32 %10, 0
+  br i1 %11, label %12, label %26
+
+12:                                               ; preds = %0
   store i32 0, ptr %6, align 4
-  br label %11
+  br label %13
 
-11:                                               ; preds = %20, %0
-  %12 = load i32, ptr %6, align 4
-  %13 = load i32, ptr %4, align 4
-  %14 = icmp slt i32 %12, %13
-  br i1 %14, label %15, label %23
+13:                                               ; preds = %22, %12
+  %14 = load i32, ptr %6, align 4
+  %15 = load i32, ptr %4, align 4
+  %16 = icmp slt i32 %14, %15
+  br i1 %16, label %17, label %25
 
-15:                                               ; preds = %11
-  %16 = load i32, ptr %2, align 4
-  %17 = add nsw i32 %16, 1
-  store i32 %17, ptr %2, align 4
-  %18 = load i32, ptr %3, align 4
-  %19 = add nsw i32 %18, 2
-  store i32 %19, ptr %3, align 4
-  br label %20
+17:                                               ; preds = %13
+  %18 = load i32, ptr %2, align 4
+  %19 = add nsw i32 %18, 1
+  store i32 %19, ptr %2, align 4
+  %20 = load i32, ptr %3, align 4
+  %21 = add nsw i32 %20, 2
+  store i32 %21, ptr %3, align 4
+  br label %22
 
-20:                                               ; preds = %15
-  %21 = load i32, ptr %6, align 4
-  %22 = add nsw i32 %21, 1
-  store i32 %22, ptr %6, align 4
-  br label %11, !llvm.loop !5
+22:                                               ; preds = %17
+  %23 = load i32, ptr %6, align 4
+  %24 = add nsw i32 %23, 1
+  store i32 %24, ptr %6, align 4
+  br label %13, !llvm.loop !5
 
-23:                                               ; preds = %11
-  %24 = load i32, ptr %2, align 4
-  %25 = load i32, ptr %4, align 4
-  %26 = mul nsw i32 2, %25
-  %27 = icmp eq i32 %24, %26
-  br i1 %27, label %31, label %28
+25:                                               ; preds = %13
+  br label %26
 
-28:                                               ; preds = %23
-  %29 = load i32, ptr %4, align 4
-  %30 = icmp slt i32 %29, 0
-  br label %31
-
-31:                                               ; preds = %28, %23
-  %32 = phi i1 [ true, %23 ], [ %30, %28 ]
-  call void @assert(i1 noundef zeroext %32)
-  %33 = load i32, ptr %2, align 4
-  %34 = load i32, ptr %3, align 4
-  %35 = add nsw i32 %33, %34
-  ret i32 %35
+26:                                               ; preds = %25, %0
+  %27 = load i32, ptr %2, align 4
+  %28 = icmp eq i32 %27, -1
+  call void @assert(i1 noundef zeroext %28)
+  %29 = load i32, ptr %2, align 4
+  %30 = load i32, ptr %3, align 4
+  %31 = add nsw i32 %29, %30
+  ret i32 %31
 }
-
-declare i32 @unknown1() #1
 
 declare i32 @unknown2() #1
 
