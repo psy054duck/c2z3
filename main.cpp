@@ -279,7 +279,6 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
             args_n_1.push_back(z3ctx.int_const(idx.data()) + 1);
         }
         z3::func_decl func_sig = z3::function(inst->getName().data(), sorts, z3ctx.int_sort());
-        assert(PN->getNumIncomingValues() == 2);
         bool has_back_edge = false;
         for (int i = 0; i < PN->getNumIncomingValues(); i++) {
             const BasicBlock* incoming_b = PN->getIncomingBlock(i);
@@ -291,33 +290,34 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
                 }
             }
         }
-        const BasicBlock* bb1 = dyn_cast<Instruction>(PN->getOperandUse(0).get())->getParent();
-        const BasicBlock* bb2 = dyn_cast<Instruction>(PN->getOperandUse(1).get())->getParent();
-        const BasicBlock* domI = DT.findNearestCommonDominator(bb1, bb2);
-        const Instruction* term = domI->getTerminator();
-        const BranchInst* branch = dyn_cast<BranchInst>(term);
-        assert(branch);
-        const Value* cond = branch->getCondition();
-
-
-
-        for (int i = 0; i < PN->getNumIncomingValues(); i++) {
-            const Use& incoming_u = PN->getOperandUse(i);
-            const BasicBlock* incoming_b = PN->getIncomingBlock(i);
-            if (depth > LI.getLoopDepth(incoming_b)) { // initial values
-                cur_expr = (func_sig(args_0) == use2z3(incoming_u, LI, z3ctx));
-            } else if (depth == LI.getLoopDepth(incoming_b)) {
-                const Loop* someLoop = LI.getLoopFor(incoming_b);
-                if (someLoop) { // inductive values
-                    bool from_latch = someLoop->isLoopLatch(incoming_b);
-                    cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx, from_latch));
-                } else { // 
+        if (!has_back_edge) {
+            assert(PN->getNumIncomingValues() == 2);
+            const BasicBlock* bb1 = PN->getIncomingBlock(0);
+            const BasicBlock* bb2 = PN->getIncomingBlock(1);
+            // const BasicBlock* domI = DT.findNearestCommonDominator(bb1, bb2);
+            const Instruction* term = domI->getTerminator();
+            const BranchInst* branch = dyn_cast<BranchInst>(term);
+            assert(branch);
+            const Value* cond = branch->getCondition();
+        } else {
+            for (int i = 0; i < PN->getNumIncomingValues(); i++) {
+                const Use& incoming_u = PN->getOperandUse(i);
+                const BasicBlock* incoming_b = PN->getIncomingBlock(i);
+                if (depth > LI.getLoopDepth(incoming_b)) { // initial values
+                    cur_expr = (func_sig(args_0) == use2z3(incoming_u, LI, z3ctx));
+                } else if (depth == LI.getLoopDepth(incoming_b)) {
+                    const Loop* someLoop = LI.getLoopFor(incoming_b);
+                    if (someLoop) { // inductive values
+                        bool from_latch = someLoop->isLoopLatch(incoming_b);
+                        cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx, from_latch));
+                    } else { // 
+                        cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
+                    }
+                } else {
                     cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
                 }
-            } else {
-                cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
+                res.push_back(cur_expr);
             }
-            res.push_back(cur_expr);
         }
     }
     z3::expr_vector globally_quantified(z3ctx);
