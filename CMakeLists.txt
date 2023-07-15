@@ -35,4 +35,4 @@ message(STATUS "${llvm_libs}")
 
 # Link against LLVM libraries
 target_link_libraries(c2z3 ${Z3_LIBRARIES} ${llvm_libs})
-add_subdirectory(IfConversion)
+# add_subdirectory(IfConversion)

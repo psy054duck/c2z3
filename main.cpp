@@ -18,6 +18,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/RegionInfo.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 #include "z3++.h"
 
@@ -366,6 +367,41 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
         unsigned opcode = inst->getOpcode();
         if (opcode == Instruction::Call) {
             return res;
+        }
+        if (opcode == Instruction::PHI) {
+            const PHINode* phi = dyn_cast<PHINode>(inst);
+            if (phi->getNumIncomingValues() == 2) {
+                IRBuilder<> builder(v->getContext());
+                const BasicBlock* curB = phi->getParent();
+                const BasicBlock* bb0 = phi->getIncomingBlock(0);
+                const BasicBlock* bb1 = phi->getIncomingBlock(1);
+                const BasicBlock* domB = DT.findNearestCommonDominator(bb0, bb1);
+                if (PDT.dominates(curB, domB)) {
+                    const Instruction* term = domB->getTerminator();
+                    const BranchInst* branch = dyn_cast<BranchInst>(term);
+                    if (branch && branch->isConditional()) {
+                        Value* condV = branch->getCondition();
+                        const BasicBlock* true_b = bb0;
+                        const BasicBlock* false_b = bb1;
+                        if (DT.dominates(branch->getSuccessor(0), bb0) || DT.dominates(branch->getSuccessor(1), bb1)) {
+                            true_b = bb0;
+                            false_b = bb1;
+                        } else {
+                            true_b = bb1;
+                            false_b = bb0;
+                        }
+                        int true_idx = phi->getBasicBlockIndex(true_b);
+                        int false_idx = phi->getBasicBlockIndex(false_b);
+                        Value* new_select = builder.CreateSelect(condV, phi->getIncomingValue(true_idx), phi->getIncomingValue(false_idx));
+                        inst = dyn_cast<Instruction>(new_select);
+                        // ReplaceInstWithInst(phi, dyn_cast<Instruction>(new_select));
+                        // phi->replaceAllUsesWith(new_select);
+                        // new_select->takeName(phi);
+                        // phi->eraseFromParent();
+                        // errs() << *dyn_cast<Instruction>(new_select) << "\n";
+                    }
+                }
+            }
         }
         z3::expr_vector cur_expr_vec = inst2z3(inst, LI, DT, PDT, loops, z3ctx);
         combine_vec(res, cur_expr_vec);
