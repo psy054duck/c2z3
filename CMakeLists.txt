@@ -18,6 +18,7 @@ message(STATUS "Using Z3.cmake in: ${Z3_DIR}")
 
 include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${Z3_CXX_INCLUDE_DIRS})
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
 
@@ -34,4 +35,4 @@ message(STATUS "${llvm_libs}")
 
 # Link against LLVM libraries
 target_link_libraries(c2z3 ${Z3_LIBRARIES} ${llvm_libs})
-add_subdirectory(LinearizeCFG)
+add_subdirectory(IfConversion)

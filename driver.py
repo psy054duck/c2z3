@@ -4,7 +4,7 @@ def main():
     tool_name = 'build/c2z3'
     filename = 'test/test.c'
     target = 'test/test.ll'
-    cmd = ['clang', '-emit-llvm', '-S' , '-Xclang -disable-O0-optnone', filename, '-o', target]
+    cmd = ['clang', '-emit-llvm', '-S' , '-Xclang', '-disable-O0-optnone', filename, '-o', target]
     is_success = subprocess.run(cmd)
     if not is_success:
         print('Fail to convert %s into LLVM IR' % filename)

@@ -6,6 +6,7 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/Analysis/PostDominators.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LCSSA.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
@@ -28,7 +29,7 @@
 using namespace llvm;
 
 typedef std::vector<BasicBlock*> BBPath;
-z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, std::set<const Loop*> loops, z3::context& z3ctx);
+z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, z3::context& z3ctx);
 
 void abortWithInfo(const std::string &s) {
     errs() << s << "\n";
@@ -211,7 +212,7 @@ std::vector<const Use*> collectAllAssertions(Function& f) {
     return assertions;
 }
 
-z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const DominatorTree& DT, std::set<const Loop*>& loops, z3::context& z3ctx) {
+z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*>& loops, z3::context& z3ctx) {
     auto opcode = inst->getOpcode();
     z3::expr_vector res(z3ctx);
     z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
@@ -279,45 +280,52 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
             args_n_1.push_back(z3ctx.int_const(idx.data()) + 1);
         }
         z3::func_decl func_sig = z3::function(inst->getName().data(), sorts, z3ctx.int_sort());
-        bool has_back_edge = false;
+        // bool has_back_edge = false;
+        // for (int i = 0; i < PN->getNumIncomingValues(); i++) {
+        //     const BasicBlock* incoming_b = PN->getIncomingBlock(i);
+        //     if (depth == LI.getLoopDepth(incoming_b)) {
+        //         const Loop* someLoop = LI.getLoopFor(incoming_b);
+        //         if (someLoop && someLoop->isLoopLatch(incoming_b)) {
+        //             has_back_edge = true;
+        //             break;
+        //         }
+        //     }
+        // }
+        // if (!has_back_edge) {
+        //     assert(PN->getNumIncomingValues() == 2);
+        //     const BasicBlock* bb1 = PN->getIncomingBlock(0);
+        //     const BasicBlock* bb2 = PN->getIncomingBlock(1);
+        //     const BasicBlock* domI = DT.findNearestCommonDominator(bb1, bb2);
+        //     if (PDT.dominates(bb, domI)) {
+        //         const Instruction* branch = domI->getTerminator();
+        //         if (auto pred = dyn_cast<BranchInst>(branch)) {
+        //             if (pred->isConditional()) {
+        //                 
+        //             }
+        //         }
+        //     }
+        //     // const Instruction* term = domI->getTerminator();
+        //     const BranchInst* branch = dyn_cast<BranchInst>(term);
+        //     assert(branch);
+        //     const Value* cond = branch->getCondition();
+        // } else {
         for (int i = 0; i < PN->getNumIncomingValues(); i++) {
+            const Use& incoming_u = PN->getOperandUse(i);
             const BasicBlock* incoming_b = PN->getIncomingBlock(i);
-            if (depth == LI.getLoopDepth(incoming_b)) {
+            if (depth > LI.getLoopDepth(incoming_b)) { // initial values
+                cur_expr = (func_sig(args_0) == use2z3(incoming_u, LI, z3ctx));
+            } else if (depth == LI.getLoopDepth(incoming_b)) {
                 const Loop* someLoop = LI.getLoopFor(incoming_b);
-                if (someLoop && someLoop->isLoopLatch(incoming_b)) {
-                    has_back_edge = true;
-                    break;
-                }
-            }
-        }
-        if (!has_back_edge) {
-            assert(PN->getNumIncomingValues() == 2);
-            const BasicBlock* bb1 = PN->getIncomingBlock(0);
-            const BasicBlock* bb2 = PN->getIncomingBlock(1);
-            // const BasicBlock* domI = DT.findNearestCommonDominator(bb1, bb2);
-            const Instruction* term = domI->getTerminator();
-            const BranchInst* branch = dyn_cast<BranchInst>(term);
-            assert(branch);
-            const Value* cond = branch->getCondition();
-        } else {
-            for (int i = 0; i < PN->getNumIncomingValues(); i++) {
-                const Use& incoming_u = PN->getOperandUse(i);
-                const BasicBlock* incoming_b = PN->getIncomingBlock(i);
-                if (depth > LI.getLoopDepth(incoming_b)) { // initial values
-                    cur_expr = (func_sig(args_0) == use2z3(incoming_u, LI, z3ctx));
-                } else if (depth == LI.getLoopDepth(incoming_b)) {
-                    const Loop* someLoop = LI.getLoopFor(incoming_b);
-                    if (someLoop) { // inductive values
-                        bool from_latch = someLoop->isLoopLatch(incoming_b);
-                        cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx, from_latch));
-                    } else { // 
-                        cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
-                    }
-                } else {
+                if (someLoop) { // inductive values
+                    bool from_latch = someLoop->isLoopLatch(incoming_b);
+                    cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx, from_latch));
+                } else { // 
                     cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
                 }
-                res.push_back(cur_expr);
+            } else {
+                cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
             }
+            res.push_back(cur_expr);
         }
     }
     z3::expr_vector globally_quantified(z3ctx);
@@ -340,7 +348,7 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
     return ret;
 }
 
-z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, std::set<const Loop*>& loops, z3::context& z3ctx) {
+z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*>& loops, z3::context& z3ctx) {
     z3::expr_vector res(z3ctx);
     // errs() << v->getName() << "\n";
     if (std::find(visited.begin(), visited.end(), v) != visited.end()) {
@@ -351,7 +359,7 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
         if (const Loop* loop = LI.getLoopFor(inst->getParent())) {
             if (loops.find(loop) == loops.end()) {
                 loops.insert(loop);
-                z3::expr_vector loop_ret = handle_loop(loop, visited, LI, DT, loops, z3ctx);
+                z3::expr_vector loop_ret = handle_loop(loop, visited, LI, DT, PDT, loops, z3ctx);
                 combine_vec(res, loop_ret);
             }
         }
@@ -359,19 +367,19 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
         if (opcode == Instruction::Call) {
             return res;
         }
-        z3::expr_vector cur_expr_vec = inst2z3(inst, LI, DT, loops, z3ctx);
+        z3::expr_vector cur_expr_vec = inst2z3(inst, LI, DT, PDT, loops, z3ctx);
         combine_vec(res, cur_expr_vec);
         // res.push_back(cur_expr);
         for (const Use& u : inst->operands()) {
             const Value* operand_v = u.get();
-            z3::expr_vector operand_expr_vec = rel2z3(operand_v, visited, LI, DT, loops, z3ctx);
+            z3::expr_vector operand_expr_vec = rel2z3(operand_v, visited, LI, DT, PDT, loops, z3ctx);
             combine_vec(res, operand_expr_vec);
         }
     }
     return res;
 }
 
-z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, std::set<const Loop*> loops, z3::context& z3ctx) {
+z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, z3::context& z3ctx) {
     z3::expr_vector res(z3ctx);
     SmallVector<BasicBlock*> exitingBBs;
     loop->getExitingBlocks(exitingBBs);
@@ -384,7 +392,7 @@ z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited
             assert(CI->isConditional());
             const Value* cond = CI->getCondition();
             exitConds.push_back(cond);
-            z3::expr_vector conds = rel2z3(cond, visited, LI, DT, loops, z3ctx);
+            z3::expr_vector conds = rel2z3(cond, visited, LI, DT, PDT, loops, z3ctx);
             combine_vec(res, conds);
             assert(CI->getNumSuccessors() == 2);
             const BasicBlock* succ = CI->getSuccessor(0);
@@ -437,7 +445,7 @@ z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited
 //     }
 // }
 
-void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT) {
+void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT) {
     // const Instruction* defInst = dyn_cast<const Instruction>(v);
     z3::context z3ctx;
     z3::solver solver(z3ctx);
@@ -447,7 +455,7 @@ void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT) 
     Value* v = u->get();
     std::vector<const Value*> visited;
     std::set<const Loop*> loops;
-    z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, loops, z3ctx);
+    z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, PDT, loops, z3ctx);
     solver.add(all_z3);
     // for (auto loop : loops) {
     //     z3::expr_vector loop_ret = handle_loop(loop, LI, z3ctx);
@@ -496,11 +504,12 @@ int main(int argc, char** argv) {
             auto &fam = MAM.getResult<FunctionAnalysisManagerModuleProxy>(*mod).getManager();
             LoopInfo &LI = fam.getResult<LoopAnalysis>(*F);
             DominatorTree DT = DominatorTree(*F);
+            PostDominatorTree PDT = PostDominatorTree(*F);
     //         // std::vector<BBPath> allPaths = pathsFromEntry2Exit(&F->getEntryBlock(), LI);
             // z3::expr_vector assertions(z3ctx);
             std::vector<const Use*> assertions = collectAllAssertions(*F);
             for (auto a : assertions) {
-                check_assertion(a, LI, DT);
+                check_assertion(a, LI, DT, PDT);
             }
         }
     }
