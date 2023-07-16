@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import os
 def main():
     tool_name = 'build/c2z3'
     filename = 'test/test.c'

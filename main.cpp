@@ -26,6 +26,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <fstream>
 
 using namespace llvm;
 
@@ -393,6 +394,7 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
                         int true_idx = phi->getBasicBlockIndex(true_b);
                         int false_idx = phi->getBasicBlockIndex(false_b);
                         Value* new_select = builder.CreateSelect(condV, phi->getIncomingValue(true_idx), phi->getIncomingValue(false_idx));
+                        new_select->setName(v->getName());
                         inst = dyn_cast<Instruction>(new_select);
                         // ReplaceInstWithInst(phi, dyn_cast<Instruction>(new_select));
                         // phi->replaceAllUsesWith(new_select);
@@ -480,6 +482,66 @@ z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited
 // 
 //     }
 // }
+z3::expr _path_condition(const BasicBlock* from, const BasicBlock* to, const LoopInfo& LI, z3::context& z3ctx) {
+    SmallVector<const BasicBlock*, 10> children;
+    z3::expr_vector guards(z3ctx);
+    z3::expr res(z3ctx, z3ctx.bool_val(false));
+    Loop* loop = LI.getLoopFor(from);
+    if (from == to) return res;
+    if (loop) {
+        if (loop->is)
+    }
+    if (LI.isLoopHeader(from)) {
+        Loop* loop = LI.getLoopFor(from);
+        if (!loop->contains(to)) {
+            loop->getExitBlocks(children);
+            for (int i = 0; i < children.size(); i++) guards.push_back(z3ctx.bool_val(true));
+        }
+    } else {
+        Loop* loop = LI.getLoopFor(to);
+        BasicBlock* header = nullptr;
+        BasicBlock* entry = &(to->getParent()->getEntryBlock());
+        if (loop) {
+            header = loop->getHeader();
+        } else {
+            header = entry;
+        }
+        Instruction* term = from->getTerminator();
+        if (auto br = dyn_cast<BranchInst>(term)) {
+            if (br->isConditional()) {
+                const Use& cond = br->getOperandUse(0);
+                z3::expr cond_z3 = use2z3(cond, LI, z3ctx);
+                guards.push_back(cond_z3);
+                guards.push_back(!cond_z3);
+                children.push_back(term->getSuccessor(0));
+                children.push_back(term->getSuccessor(1));
+            } else {
+                assert(term->getNumSuccessors() == 1);
+                guards.push_back(z3ctx.bool_val(true));
+                children.push_back(term->getSuccessor(0));
+            }
+        }
+    }
+    for (int i = 0; i < children.size(); i++) {
+        BasicBlock* bb = children[i];
+        z3::expr children_condition = _path_condition(bb, to, LI, z3ctx);
+        res = res || (children_condition && guards[i]);
+    }
+    return res;
+}
+
+z3::expr path_condition(const BasicBlock* bb, const LoopInfo& LI, z3::context& z3ctx) {
+    const Loop* loop = LI.getLoopFor(bb);
+    const BasicBlock* header = nullptr;
+    const BasicBlock* entry = &(bb->getParent()->getEntryBlock());
+    if (loop) {
+        header = loop->getHeader();
+    } else {
+        header = entry;
+    }
+    z3::expr res = _path_condition(header, bb, LI, z3ctx);
+}
+
 
 void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT) {
     // const Instruction* defInst = dyn_cast<const Instruction>(v);
@@ -532,7 +594,11 @@ int main(int argc, char** argv) {
     MPM.addPass(createModuleToFunctionPassAdaptor(AggressiveInstCombinePass()));
     MPM.run(*mod, MAM);
 
-    mod->print(errs(), NULL);
+
+    std::error_code ec;
+    raw_fd_ostream output_fd("tmp/tmp.ll", ec);
+    mod->print(output_fd, NULL);
+    output_fd.close();
     z3::context z3ctx;
     for (auto F = mod->begin(); F != mod->end(); F++) {
         if (F->getName() == "main") {
