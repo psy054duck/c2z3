@@ -20,8 +20,9 @@ int main() {
         for (int i = 0; i < x0; i++) {
             x++;
             y += 2;
+            assert(x == x0 + x0);
         }
-        assert(x == x0 + x0);
+        // assert(x == x0 + x0);
     }
     // assert(x == x0);
     // assert(y + x == x0 + y0 + 3);

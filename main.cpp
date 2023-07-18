@@ -137,65 +137,6 @@ z3::expr def2z3(const Value* v, const LoopInfo& LI, z3::context &z3ctx) {
     return res;
 }
 
-// z3::expr_vector bb2z3(const BasicBlock* bb, std::vector<Value*>& assertions, const LoopInfo& LI, z3::context& z3ctx) {
-//     z3::expr_vector expr_v(z3ctx);
-//     for (const auto& I : *bb) {
-//         auto opcode = I.getOpcode();
-//         z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
-//         if (I.isBinaryOp()) {
-//             // z3::expr lhs = z3ctx.int_const(I.getName().data());
-//             z3::expr lhs = def2z3(&I, LI, z3ctx);
-//             z3::expr operand0 = use2z3(I.getOperandUse(0), LI, z3ctx);
-//             z3::expr operand1 = use2z3(I.getOperandUse(1), LI, z3ctx);
-//             if (opcode == Instruction::Add) {
-//                 cur_expr = (lhs == operand0 + operand1);
-//             } else if (opcode == Instruction::Sub) {
-//                 cur_expr = (lhs == operand0 - operand1);
-//             } else if (opcode == Instruction::Mul) {
-//                 cur_expr = (lhs == operand0 * operand1);
-//             }
-//         } else if (opcode == Instruction::Select) {
-//             z3::expr lhs = def2z3(&I, LI, z3ctx);
-//             z3::expr pred = z3ctx.bool_const(I.getOperand(0)->getName().data());
-//             z3::expr true_v = use2z3(I.getOperandUse(1), LI, z3ctx);
-//             z3::expr false_v = use2z3(I.getOperandUse(2), LI, z3ctx);
-//             cur_expr = (lhs == z3::ite(pred, true_v, false_v));
-//         } else if (opcode == Instruction::ICmp) {
-//             z3::expr lhs = def2z3(&I, LI, z3ctx);
-//             z3::expr operand0 = use2z3(I.getOperandUse(0), LI, z3ctx);
-//             z3::expr operand1 = use2z3(I.getOperandUse(1), LI, z3ctx);
-//             if (auto ci = dyn_cast<ICmpInst>(&I)) {
-//                 auto pred = ci->getPredicate();
-//                 if (ICmpInst::isLT(pred)) {
-//                     cur_expr = (lhs == operand0 < operand1);
-//                 } else if (ICmpInst::isLE(pred)) {
-//                     cur_expr = (lhs == operand0 <= operand1);
-//                 } else if (ICmpInst::isGT(pred)) {
-//                     cur_expr = (lhs == operand0 > operand1);
-//                 } else if (ICmpInst::isGE(pred)) {
-//                     cur_expr = (lhs == operand0 >= operand1);
-//                 } else if (ICmpInst::isEquality(pred)) {
-//                     cur_expr = (lhs == (operand0 == operand1));
-//                 }
-//             }
-//         } else if (opcode == Instruction::Call) {
-//             auto callStmt = dyn_cast<CallInst>(&I);
-//             Function* calledFunction = callStmt->getCalledFunction();
-//             StringRef funcName = calledFunction->getName();
-//             if (funcName.endswith("assert")) {
-//                 assert(callStmt->arg_size() == 1);
-//                 assertions.push_back(callStmt->getArgOperand(0));
-//                 // z3::expr ass = z3ctx.bool_const(callStmt->getArgOperand(0)->getName().data());
-//                 // assertions.push_back(ass);
-//             }
-//         }
-//         if (!cur_expr.is_true()) {
-//             expr_v.push_back(cur_expr);
-//         }
-//     }
-//     return expr_v;
-// }
-
 std::vector<const Use*> collectAllAssertions(Function& f) {
     std::vector<const Use*> assertions;
     for (const auto& bb : f) {
@@ -282,35 +223,6 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
             args_n_1.push_back(z3ctx.int_const(idx.data()) + 1);
         }
         z3::func_decl func_sig = z3::function(inst->getName().data(), sorts, z3ctx.int_sort());
-        // bool has_back_edge = false;
-        // for (int i = 0; i < PN->getNumIncomingValues(); i++) {
-        //     const BasicBlock* incoming_b = PN->getIncomingBlock(i);
-        //     if (depth == LI.getLoopDepth(incoming_b)) {
-        //         const Loop* someLoop = LI.getLoopFor(incoming_b);
-        //         if (someLoop && someLoop->isLoopLatch(incoming_b)) {
-        //             has_back_edge = true;
-        //             break;
-        //         }
-        //     }
-        // }
-        // if (!has_back_edge) {
-        //     assert(PN->getNumIncomingValues() == 2);
-        //     const BasicBlock* bb1 = PN->getIncomingBlock(0);
-        //     const BasicBlock* bb2 = PN->getIncomingBlock(1);
-        //     const BasicBlock* domI = DT.findNearestCommonDominator(bb1, bb2);
-        //     if (PDT.dominates(bb, domI)) {
-        //         const Instruction* branch = domI->getTerminator();
-        //         if (auto pred = dyn_cast<BranchInst>(branch)) {
-        //             if (pred->isConditional()) {
-        //                 
-        //             }
-        //         }
-        //     }
-        //     // const Instruction* term = domI->getTerminator();
-        //     const BranchInst* branch = dyn_cast<BranchInst>(term);
-        //     assert(branch);
-        //     const Value* cond = branch->getCondition();
-        // } else {
         for (int i = 0; i < PN->getNumIncomingValues(); i++) {
             const Use& incoming_u = PN->getOperandUse(i);
             const BasicBlock* incoming_b = PN->getIncomingBlock(i);
@@ -475,71 +387,81 @@ z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited
     return res;
 }
 
-// z3::expr_vector get_path_condition(const Value* v, const LoopInfo& LI, z3::context& z3ctx) {
-//     z3::expr_vector res(z3ctx);
-//     if (auto CI = dyn_cast<Instruction>(v)) {
-//         const BasicBlock* bb = CI->getParent();
-// 
+// z3::expr _path_condition(const BasicBlock* from, const BasicBlock* to, const LoopInfo& LI, z3::context& z3ctx) {
+//     SmallVector<const BasicBlock*, 10> children;
+//     z3::expr_vector guards(z3ctx);
+//     z3::expr res(z3ctx, z3ctx.bool_val(false));
+//     Loop* loop = LI.getLoopFor(from);
+//     if (from == to) return res;
+//     if (loop) {
+//         if (loop->is)
 //     }
+//     if (LI.isLoopHeader(from)) {
+//         Loop* loop = LI.getLoopFor(from);
+//         if (!loop->contains(to)) {
+//             loop->getExitBlocks(children);
+//             for (int i = 0; i < children.size(); i++) guards.push_back(z3ctx.bool_val(true));
+//         }
+//     } else {
+//         Loop* loop = LI.getLoopFor(to);
+//         BasicBlock* header = nullptr;
+//         BasicBlock* entry = &(to->getParent()->getEntryBlock());
+//         if (loop) {
+//             header = loop->getHeader();
+//         } else {
+//             header = entry;
+//         }
+//         Instruction* term = from->getTerminator();
+//         if (auto br = dyn_cast<BranchInst>(term)) {
+//             if (br->isConditional()) {
+//                 const Use& cond = br->getOperandUse(0);
+//                 z3::expr cond_z3 = use2z3(cond, LI, z3ctx);
+//                 guards.push_back(cond_z3);
+//                 guards.push_back(!cond_z3);
+//                 children.push_back(term->getSuccessor(0));
+//                 children.push_back(term->getSuccessor(1));
+//             } else {
+//                 assert(term->getNumSuccessors() == 1);
+//                 guards.push_back(z3ctx.bool_val(true));
+//                 children.push_back(term->getSuccessor(0));
+//             }
+//         }
+//     }
+//     for (int i = 0; i < children.size(); i++) {
+//         BasicBlock* bb = children[i];
+//         z3::expr children_condition = _path_condition(bb, to, LI, z3ctx);
+//         res = res || (children_condition && guards[i]);
+//     }
+//     return res;
 // }
-z3::expr _path_condition(const BasicBlock* from, const BasicBlock* to, const LoopInfo& LI, z3::context& z3ctx) {
-    SmallVector<const BasicBlock*, 10> children;
-    z3::expr_vector guards(z3ctx);
-    z3::expr res(z3ctx, z3ctx.bool_val(false));
-    Loop* loop = LI.getLoopFor(from);
-    if (from == to) return res;
-    if (loop) {
-        if (loop->is)
-    }
-    if (LI.isLoopHeader(from)) {
-        Loop* loop = LI.getLoopFor(from);
-        if (!loop->contains(to)) {
-            loop->getExitBlocks(children);
-            for (int i = 0; i < children.size(); i++) guards.push_back(z3ctx.bool_val(true));
-        }
-    } else {
-        Loop* loop = LI.getLoopFor(to);
-        BasicBlock* header = nullptr;
-        BasicBlock* entry = &(to->getParent()->getEntryBlock());
-        if (loop) {
-            header = loop->getHeader();
-        } else {
-            header = entry;
-        }
-        Instruction* term = from->getTerminator();
-        if (auto br = dyn_cast<BranchInst>(term)) {
-            if (br->isConditional()) {
-                const Use& cond = br->getOperandUse(0);
-                z3::expr cond_z3 = use2z3(cond, LI, z3ctx);
-                guards.push_back(cond_z3);
-                guards.push_back(!cond_z3);
-                children.push_back(term->getSuccessor(0));
-                children.push_back(term->getSuccessor(1));
-            } else {
-                assert(term->getNumSuccessors() == 1);
-                guards.push_back(z3ctx.bool_val(true));
-                children.push_back(term->getSuccessor(0));
-            }
-        }
-    }
-    for (int i = 0; i < children.size(); i++) {
-        BasicBlock* bb = children[i];
-        z3::expr children_condition = _path_condition(bb, to, LI, z3ctx);
-        res = res || (children_condition && guards[i]);
-    }
-    return res;
-}
 
 z3::expr path_condition(const BasicBlock* bb, const LoopInfo& LI, z3::context& z3ctx) {
-    const Loop* loop = LI.getLoopFor(bb);
-    const BasicBlock* header = nullptr;
+    z3::expr res(z3ctx, z3ctx.bool_val(false));
     const BasicBlock* entry = &(bb->getParent()->getEntryBlock());
-    if (loop) {
-        header = loop->getHeader();
-    } else {
-        header = entry;
+    if (bb == entry) return z3ctx.bool_val(true);
+    for (auto pred_pp = pred_begin(bb); pred_pp != pred_end(bb); pred_pp++) {
+        z3::expr cur_expr(z3ctx, z3ctx.bool_val(true));
+        const BasicBlock* pred = *pred_pp;
+        Loop* loop = LI.getLoopFor(bb);
+        if (loop && LI.isLoopHeader(bb) && loop->contains(pred) && loop->isLoopLatch(pred)) continue;
+        const Instruction* term = pred->getTerminator();
+        const BranchInst* br = dyn_cast<BranchInst>(term);
+        if (br->isConditional()) {
+            int idx = 0;
+            for (idx = 0; idx < term->getNumSuccessors(); idx++) {
+                if (bb == term->getSuccessor(idx)) {
+                    break;
+                }
+            }
+            cur_expr = use2z3(br->getOperandUse(0), LI, z3ctx);
+            if (idx == 1) {
+                cur_expr = !cur_expr;
+            }
+        }
+        z3::expr pred_cond = path_condition(pred, LI, z3ctx);
+        res = res || (pred_cond && cur_expr);
     }
-    z3::expr res = _path_condition(header, bb, LI, z3ctx);
+    return res;
 }
 
 
@@ -551,20 +473,19 @@ void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, 
     // solver.add(z3ctx.int_const("N0") == 0);
     solver.add(!use2z3(*u, LI, z3ctx));
     Value* v = u->get();
-    std::vector<const Value*> visited;
-    std::set<const Loop*> loops;
-    z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, PDT, loops, z3ctx);
-    solver.add(all_z3);
-    // for (auto loop : loops) {
-    //     z3::expr_vector loop_ret = handle_loop(loop, LI, z3ctx);
-    //     solver.add(loop_ret);
+    Instruction* user = dyn_cast<Instruction>(u->getUser());
+    const BasicBlock* assert_block = user->getParent();
+    errs() << path_condition(assert_block, LI, z3ctx).simplify().to_string() << "\n";
+    // std::vector<const Value*> visited;
+    // std::set<const Loop*> loops;
+    // z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, PDT, loops, z3ctx);
+    // solver.add(all_z3);
+    // errs() << solver.to_smt2();
+    // switch (solver.check()) {
+    //     case z3::sat: errs() << "Wrong\n"; break;
+    //     case z3::unsat: errs() << "Correct\n"; break;
+    //     default: errs() << "Unknown\n"; break;
     // }
-    errs() << solver.to_smt2();
-    switch (solver.check()) {
-        case z3::sat: errs() << "Wrong\n"; break;
-        case z3::unsat: errs() << "Correct\n"; break;
-        default: errs() << "Unknown\n"; break;
-    }
 }
 
 int main(int argc, char** argv) {
