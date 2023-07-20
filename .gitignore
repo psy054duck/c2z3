@@ -3,3 +3,4 @@
 *.dylib
 tmp*
 /build*
+.DS_Store

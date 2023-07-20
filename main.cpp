@@ -45,7 +45,7 @@ void combine_vec(z3::expr_vector& vec1, const z3::expr_vector& vec2) {
 }
 
 // only works for Use
-z3::expr use2z3(const Use& u, const LoopInfo& LI, z3::context &z3ctx, bool from_latch = false) {
+z3::expr use2z3(const Use& u, const LoopInfo& LI, z3::context &z3ctx, bool from_latch = false, bool exit_cond = false) {
     z3::expr res(z3ctx);
     const Value* v = u.get();
     const User* user = u.getUser();
@@ -77,7 +77,7 @@ z3::expr use2z3(const Use& u, const LoopInfo& LI, z3::context &z3ctx, bool from_
         if (defDepth > 0) {
             sorts.push_back(z3ctx.int_sort());
             std::string idx = std::string("n") + std::to_string(defDepth - 1);
-            if (userDepth < defDepth) {
+            if (userDepth < defDepth || exit_cond) {
                 idx = std::string("N") + std::to_string(defDepth - 1);
                 args.push_back(z3ctx.int_const(idx.data()));
             } else {
@@ -93,7 +93,7 @@ z3::expr use2z3(const Use& u, const LoopInfo& LI, z3::context &z3ctx, bool from_
         z3::func_decl func_sig = z3ctx.function(v->getName().data(), sorts, ret_sort);
         res = func_sig(args);
     }
-    return res;
+    return res.simplify();
 }
 
 z3::expr def2z3(const Value* v, const LoopInfo& LI, z3::context &z3ctx) {
@@ -134,7 +134,7 @@ z3::expr def2z3(const Value* v, const LoopInfo& LI, z3::context &z3ctx) {
         //     res = z3ctx.int_const(v->getName().data());
         // }
     }
-    return res;
+    return res.simplify();
 }
 
 std::vector<const Use*> collectAllAssertions(Function& f) {
@@ -171,14 +171,15 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
         } else if (opcode == Instruction::Mul) {
             cur_expr = (lhs == operand0 * operand1);
         }
-        res.push_back(cur_expr);
+        res.push_back(cur_expr.simplify());
     } else if (opcode == Instruction::Select) {
         z3::expr lhs = def2z3(inst, LI, z3ctx);
-        z3::expr pred = z3ctx.bool_const(inst->getOperand(0)->getName().data());
+        // z3::expr pred = z3ctx.bool_const(inst->getOperand(0)->getName().data());
+        z3::expr pred = use2z3(inst->getOperandUse(0), LI, z3ctx);
         z3::expr true_v = use2z3(inst->getOperandUse(1), LI, z3ctx);
         z3::expr false_v = use2z3(inst->getOperandUse(2), LI, z3ctx);
         cur_expr = (lhs == z3::ite(pred, true_v, false_v));
-        res.push_back(cur_expr);
+        res.push_back(cur_expr.simplify());
     } else if (opcode == Instruction::ICmp) {
         z3::expr lhs = def2z3(inst, LI, z3ctx);
         z3::expr operand0 = use2z3(inst->getOperandUse(0), LI, z3ctx);
@@ -197,7 +198,7 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
                 cur_expr = (lhs == (operand0 == operand1));
             }
         }
-        res.push_back(cur_expr);
+        res.push_back(cur_expr.simplify());
     } else if (opcode == Instruction::PHI) {
         assert(inst->getType()->isIntegerTy());
         const PHINode* PN = dyn_cast<PHINode>(inst);
@@ -239,7 +240,7 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
             } else {
                 cur_expr = (def2z3(inst, LI, z3ctx) == use2z3(incoming_u, LI, z3ctx));
             }
-            res.push_back(cur_expr);
+            res.push_back(cur_expr.simplify());
         }
     }
     z3::expr_vector globally_quantified(z3ctx);
@@ -253,10 +254,10 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
     for (int i = 0; i < res.size(); i++) {
         if (depth > 0) {
             const Loop* loop = LI.getLoopFor(inst->getParent());
-            ret.push_back(z3::forall(globally_quantified, res[i]));
+            ret.push_back(z3::forall(globally_quantified, res[i]).simplify());
             // loops.insert(loop);
         } else {
-            ret.push_back(res[i]);
+            ret.push_back(res[i].simplify());
         }
     }
     return ret;
@@ -308,11 +309,6 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
                         Value* new_select = builder.CreateSelect(condV, phi->getIncomingValue(true_idx), phi->getIncomingValue(false_idx));
                         new_select->setName(v->getName());
                         inst = dyn_cast<Instruction>(new_select);
-                        // ReplaceInstWithInst(phi, dyn_cast<Instruction>(new_select));
-                        // phi->replaceAllUsesWith(new_select);
-                        // new_select->takeName(phi);
-                        // phi->eraseFromParent();
-                        // errs() << *dyn_cast<Instruction>(new_select) << "\n";
                     }
                 }
             }
@@ -380,60 +376,12 @@ z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited
         final_in_cond = final_in_cond && !(true_or_false[i] ? func(args_in) : !func(args_in));
     }
 
-    res.push_back(final_out_cond);
+    res.push_back(final_out_cond.simplify());
     final_in_cond = z3::forall(args_in, z3::implies(args_in.back() < args_out.back() && args_in.back() >= 0, final_in_cond));
-    res.push_back(final_in_cond);
+    res.push_back(final_in_cond.simplify());
     res.push_back(args_out.back() >= 0);
     return res;
 }
-
-// z3::expr _path_condition(const BasicBlock* from, const BasicBlock* to, const LoopInfo& LI, z3::context& z3ctx) {
-//     SmallVector<const BasicBlock*, 10> children;
-//     z3::expr_vector guards(z3ctx);
-//     z3::expr res(z3ctx, z3ctx.bool_val(false));
-//     Loop* loop = LI.getLoopFor(from);
-//     if (from == to) return res;
-//     if (loop) {
-//         if (loop->is)
-//     }
-//     if (LI.isLoopHeader(from)) {
-//         Loop* loop = LI.getLoopFor(from);
-//         if (!loop->contains(to)) {
-//             loop->getExitBlocks(children);
-//             for (int i = 0; i < children.size(); i++) guards.push_back(z3ctx.bool_val(true));
-//         }
-//     } else {
-//         Loop* loop = LI.getLoopFor(to);
-//         BasicBlock* header = nullptr;
-//         BasicBlock* entry = &(to->getParent()->getEntryBlock());
-//         if (loop) {
-//             header = loop->getHeader();
-//         } else {
-//             header = entry;
-//         }
-//         Instruction* term = from->getTerminator();
-//         if (auto br = dyn_cast<BranchInst>(term)) {
-//             if (br->isConditional()) {
-//                 const Use& cond = br->getOperandUse(0);
-//                 z3::expr cond_z3 = use2z3(cond, LI, z3ctx);
-//                 guards.push_back(cond_z3);
-//                 guards.push_back(!cond_z3);
-//                 children.push_back(term->getSuccessor(0));
-//                 children.push_back(term->getSuccessor(1));
-//             } else {
-//                 assert(term->getNumSuccessors() == 1);
-//                 guards.push_back(z3ctx.bool_val(true));
-//                 children.push_back(term->getSuccessor(0));
-//             }
-//         }
-//     }
-//     for (int i = 0; i < children.size(); i++) {
-//         BasicBlock* bb = children[i];
-//         z3::expr children_condition = _path_condition(bb, to, LI, z3ctx);
-//         res = res || (children_condition && guards[i]);
-//     }
-//     return res;
-// }
 
 z3::expr path_condition(const BasicBlock* bb, const LoopInfo& LI, z3::context& z3ctx) {
     z3::expr res(z3ctx, z3ctx.bool_val(false));
@@ -453,7 +401,7 @@ z3::expr path_condition(const BasicBlock* bb, const LoopInfo& LI, z3::context& z
                     break;
                 }
             }
-            cur_expr = use2z3(br->getOperandUse(0), LI, z3ctx);
+            cur_expr = use2z3(br->getOperandUse(0), LI, z3ctx, false, true);
             if (idx == 1) {
                 cur_expr = !cur_expr;
             }
@@ -464,8 +412,7 @@ z3::expr path_condition(const BasicBlock* bb, const LoopInfo& LI, z3::context& z
     return res;
 }
 
-
-void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT) {
+void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::ofstream& out) {
     // const Instruction* defInst = dyn_cast<const Instruction>(v);
     z3::context z3ctx;
     z3::solver solver(z3ctx);
@@ -475,17 +422,22 @@ void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, 
     Value* v = u->get();
     Instruction* user = dyn_cast<Instruction>(u->getUser());
     const BasicBlock* assert_block = user->getParent();
-    errs() << path_condition(assert_block, LI, z3ctx).simplify().to_string() << "\n";
-    // std::vector<const Value*> visited;
-    // std::set<const Loop*> loops;
-    // z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, PDT, loops, z3ctx);
-    // solver.add(all_z3);
-    // errs() << solver.to_smt2();
-    // switch (solver.check()) {
-    //     case z3::sat: errs() << "Wrong\n"; break;
-    //     case z3::unsat: errs() << "Correct\n"; break;
-    //     default: errs() << "Unknown\n"; break;
-    // }
+    // errs() << path_condition(assert_block, LI, z3ctx).simplify().to_string() << "\n";
+    std::vector<const Value*> visited;
+    std::set<const Loop*> loops;
+    z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, PDT, loops, z3ctx);
+    z3::expr path_cond = path_condition(assert_block, LI, z3ctx);
+    solver.add(all_z3);
+    solver.add(path_cond);
+    out << solver.to_smt2();
+    z3::params p(z3ctx);
+    p.set(":timeout", 3000u);
+    solver.set(p);
+    switch (solver.check()) {
+        case z3::sat: errs() << "Wrong\n"; break;
+        case z3::unsat: errs() << "Correct\n"; break;
+        default: errs() << "Unknown\n"; break;
+    }
 }
 
 int main(int argc, char** argv) {
@@ -531,8 +483,11 @@ int main(int argc, char** argv) {
     //         // std::vector<BBPath> allPaths = pathsFromEntry2Exit(&F->getEntryBlock(), LI);
             // z3::expr_vector assertions(z3ctx);
             std::vector<const Use*> assertions = collectAllAssertions(*F);
+            int i = 0;
             for (auto a : assertions) {
-                check_assertion(a, LI, DT, PDT);
+                std::ofstream out("tmp/tmp" + std::to_string(i) + ".smt2");
+                check_assertion(a, LI, DT, PDT, out);
+                out.close();
             }
         }
     }
