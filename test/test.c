@@ -6,13 +6,10 @@ extern void assert(bool);
 int main()
 {
 	unsigned int x = 0;
-	unsigned int y = 10000000;
 	unsigned int z=5000000;
-	while(x<y){	
-		if(x>=5000000)
-			z--;
-		x++;
+	while(x<z){	
+		x += 2;
 	}
-	assert(z==0);
+	assert(x == z);
 	return 0;
 }

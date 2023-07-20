@@ -30,8 +30,7 @@
 
 using namespace llvm;
 
-typedef std::vector<BasicBlock*> BBPath;
-z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, z3::context& z3ctx);
+z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, std::map<Value*, z3::expr_vector>& cached, z3::context& z3ctx);
 
 void abortWithInfo(const std::string &s) {
     errs() << s << "\n";
@@ -42,6 +41,37 @@ void combine_vec(z3::expr_vector& vec1, const z3::expr_vector& vec2) {
     for (z3::expr e : vec2) {
         vec1.push_back(e);
     }
+}
+
+void find_phi_in_header(const Value* v, const Loop* loop, const LoopInfo& LI, std::vector<const PHINode*>& phis) {
+    if (isa<Constant>(v)) return;
+    const BasicBlock* header = loop->getHeader();
+    const Instruction* ins = dyn_cast<Instruction>(v);
+    const BasicBlock* cur_bb = ins->getParent();
+    const Loop* cur_loop = LI.getLoopFor(cur_bb);
+    if (cur_loop != loop) {
+        return;
+    } else if (cur_bb == header && isa<PHINode>(ins)) {
+        phis.push_back(dyn_cast<PHINode>(ins));
+    } else {
+        for (auto& operand : ins->operands()) {
+            Value* op_v = operand.get();
+            find_phi_in_header(op_v, loop, LI, phis);
+        }
+    }
+}
+
+z3::expr_vector solve_rec(const Value* v, const LoopInfo& LI, z3::context& z3ctx) {
+    z3::expr_vector res(z3ctx);
+    const Instruction* ins = dyn_cast<Instruction>(v);
+    Loop* loop = LI.getLoopFor(ins->getParent());
+    if (!loop) return res;
+    std::vector<const PHINode*> phis;
+    find_phi_in_header(v, loop, LI, phis);
+    for (auto p : phis) {
+        errs() << p->getName() << "\n";
+    }
+    return res;
 }
 
 // only works for Use
@@ -263,7 +293,9 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
     return ret;
 }
 
-z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*>& loops, z3::context& z3ctx) {
+
+
+z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*>& loops, std::map<Value*, z3::expr_vector>& cached, z3::context& z3ctx) {
     z3::expr_vector res(z3ctx);
     // errs() << v->getName() << "\n";
     if (std::find(visited.begin(), visited.end(), v) != visited.end()) {
@@ -274,9 +306,10 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
         if (const Loop* loop = LI.getLoopFor(inst->getParent())) {
             if (loops.find(loop) == loops.end()) {
                 loops.insert(loop);
-                z3::expr_vector loop_ret = handle_loop(loop, visited, LI, DT, PDT, loops, z3ctx);
+                z3::expr_vector loop_ret = handle_loop(loop, visited, LI, DT, PDT, loops, cached, z3ctx);
                 combine_vec(res, loop_ret);
             }
+            solve_rec(v, LI, z3ctx);
         }
         unsigned opcode = inst->getOpcode();
         if (opcode == Instruction::Call) {
@@ -318,14 +351,14 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
         // res.push_back(cur_expr);
         for (const Use& u : inst->operands()) {
             const Value* operand_v = u.get();
-            z3::expr_vector operand_expr_vec = rel2z3(operand_v, visited, LI, DT, PDT, loops, z3ctx);
+            z3::expr_vector operand_expr_vec = rel2z3(operand_v, visited, LI, DT, PDT, loops, cached, z3ctx);
             combine_vec(res, operand_expr_vec);
         }
     }
     return res;
 }
 
-z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, z3::context& z3ctx) {
+z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, std::map<Value*, z3::expr_vector>& cached, z3::context& z3ctx) {
     z3::expr_vector res(z3ctx);
     SmallVector<BasicBlock*> exitingBBs;
     loop->getExitingBlocks(exitingBBs);
@@ -338,7 +371,7 @@ z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited
             assert(CI->isConditional());
             const Value* cond = CI->getCondition();
             exitConds.push_back(cond);
-            z3::expr_vector conds = rel2z3(cond, visited, LI, DT, PDT, loops, z3ctx);
+            z3::expr_vector conds = rel2z3(cond, visited, LI, DT, PDT, loops, cached, z3ctx);
             combine_vec(res, conds);
             assert(CI->getNumSuccessors() == 2);
             const BasicBlock* succ = CI->getSuccessor(0);
@@ -425,7 +458,8 @@ void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, 
     // errs() << path_condition(assert_block, LI, z3ctx).simplify().to_string() << "\n";
     std::vector<const Value*> visited;
     std::set<const Loop*> loops;
-    z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, PDT, loops, z3ctx);
+    std::map<Value*, z3::expr_vector> cached;
+    z3::expr_vector all_z3 = rel2z3(v, visited, LI, DT, PDT, loops, cached, z3ctx);
     z3::expr path_cond = path_condition(assert_block, LI, z3ctx);
     solver.add(all_z3);
     solver.add(path_cond);
