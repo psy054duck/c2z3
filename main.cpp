@@ -43,7 +43,7 @@ void combine_vec(z3::expr_vector& vec1, const z3::expr_vector& vec2) {
     }
 }
 
-void find_phi_in_header(const Value* v, const Loop* loop, const LoopInfo& LI, std::vector<const PHINode*>& phis) {
+void find_phi_in_header(const Value* v, const Loop* loop, const LoopInfo& LI, std::set<const PHINode*>& phis) {
     if (isa<Constant>(v)) return;
     const BasicBlock* header = loop->getHeader();
     const Instruction* ins = dyn_cast<Instruction>(v);
@@ -52,7 +52,7 @@ void find_phi_in_header(const Value* v, const Loop* loop, const LoopInfo& LI, st
     if (cur_loop != loop) {
         return;
     } else if (cur_bb == header && isa<PHINode>(ins)) {
-        phis.push_back(dyn_cast<PHINode>(ins));
+        phis.insert(dyn_cast<PHINode>(ins));
     } else {
         for (auto& operand : ins->operands()) {
             Value* op_v = operand.get();
@@ -66,11 +66,19 @@ z3::expr_vector solve_rec(const Value* v, const LoopInfo& LI, z3::context& z3ctx
     const Instruction* ins = dyn_cast<Instruction>(v);
     Loop* loop = LI.getLoopFor(ins->getParent());
     if (!loop) return res;
-    std::vector<const PHINode*> phis;
+    std::set<const PHINode*> phis;
     find_phi_in_header(v, loop, LI, phis);
     for (auto p : phis) {
-        errs() << p->getName() << "\n";
+        for (int i = 0; i < p->getNumIncomingValues(); i++) {
+            const BasicBlock* bb = p->getIncomingBlock(i);
+            if (loop->contains(bb)) {
+            z3::alge
+            } else {
+                // initial value
+            }
+        }
     }
+    
     return res;
 }
 
