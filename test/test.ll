@@ -8,28 +8,34 @@ define i32 @main() #0 {
   %1 = alloca i32, align 4
   %2 = alloca i32, align 4
   %3 = alloca i32, align 4
+  %4 = alloca i32, align 4
   store i32 0, ptr %1, align 4
   store i32 0, ptr %2, align 4
-  store i32 5000000, ptr %3, align 4
-  br label %4
+  store i32 0, ptr %3, align 4
+  store i32 5000000, ptr %4, align 4
+  br label %5
 
-4:                                                ; preds = %8, %0
-  %5 = load i32, ptr %2, align 4
-  %6 = load i32, ptr %3, align 4
-  %7 = icmp ult i32 %5, %6
-  br i1 %7, label %8, label %11
+5:                                                ; preds = %9, %0
+  %6 = load i32, ptr %2, align 4
+  %7 = load i32, ptr %4, align 4
+  %8 = icmp ult i32 %6, %7
+  br i1 %8, label %9, label %14
 
-8:                                                ; preds = %4
-  %9 = load i32, ptr %2, align 4
-  %10 = add i32 %9, 2
-  store i32 %10, ptr %2, align 4
-  br label %4, !llvm.loop !5
+9:                                                ; preds = %5
+  %10 = load i32, ptr %2, align 4
+  %11 = add i32 %10, 2
+  store i32 %11, ptr %2, align 4
+  %12 = load i32, ptr %3, align 4
+  %13 = add i32 %12, 4
+  store i32 %13, ptr %3, align 4
+  br label %5, !llvm.loop !5
 
-11:                                               ; preds = %4
-  %12 = load i32, ptr %2, align 4
-  %13 = load i32, ptr %3, align 4
-  %14 = icmp eq i32 %12, %13
-  call void @assert(i1 noundef zeroext %14)
+14:                                               ; preds = %5
+  %15 = load i32, ptr %3, align 4
+  %16 = load i32, ptr %4, align 4
+  %17 = mul i32 2, %16
+  %18 = icmp eq i32 %15, %17
+  call void @assert(i1 noundef zeroext %18)
   ret i32 0
 }
 
