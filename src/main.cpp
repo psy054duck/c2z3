@@ -28,9 +28,12 @@
 #include <set>
 #include <fstream>
 
+#include "rec_solver.h"
+
 using namespace llvm;
 
 z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, std::map<Value*, z3::expr_vector>& cached, z3::context& z3ctx);
+z3::expr def2z3(const Value* v, const LoopInfo& LI, z3::context &z3ctx);
 
 void abortWithInfo(const std::string &s) {
     errs() << s << "\n";
@@ -43,11 +46,31 @@ void combine_vec(z3::expr_vector& vec1, const z3::expr_vector& vec2) {
     }
 }
 
-z3::expr value2z3(const Value* v, z3::context& z3ctx) {
+z3::expr value2z3(const Value* v, const Loop* loop, z3::context& z3ctx, bool initial=false) {
+    z3::sort_vector args(z3ctx);
+    z3::expr_vector inv_vars(z3ctx);
+    int depth = loop->getLoopDepth();
+
+    for (int i = 0; i < depth; i++) {
+        std::string inv_var_name = "n" + std::to_string(i);
+        args.push_back(z3ctx.int_sort());
+        inv_vars.push_back(z3ctx.int_const(inv_var_name.data()));
+    }
+    // args.push_back(z3ctx.int_sort());
+    // if (initial) {
+    //     inv_vars.push_back(z3ctx.int_val(0));
+    // } else {
+    //     std::string inv_var_name = "n" + std::to_string(depth - 1);
+    //     inv_vars.push_back(z3ctx.int_const(inv_var_name.data()));
+    // }
+    z3::func_decl func = z3ctx.function(v->getName().data(), args, z3ctx.int_sort());
     if (auto CI = dyn_cast<ConstantInt>(v)) {
         return z3ctx.int_val(CI->getSExtValue());
-    } else {
+    } else if (initial) {
         return z3ctx.int_const(v->getName().data());
+    } else {
+        return func(inv_vars);
+        // return z3ctx.int_const(v->getName().data());
     }
 }
 
@@ -57,7 +80,7 @@ z3::expr get_initial_value(const PHINode* phi, const Loop* loop, z3::context& z3
         const BasicBlock* cur_bb = phi->getIncomingBlock(i);
         if (!loop->contains(cur_bb)) {
             const Value* incoming_v = phi->getIncomingValue(i);
-            return value2z3(incoming_v, z3ctx);
+            return value2z3(incoming_v, loop, z3ctx, true);
         }
     }
     abortWithInfo("no initial value");
@@ -78,19 +101,19 @@ const Value* get_rec_value(const PHINode* phi, const Loop* loop, z3::context& z3
 }
 
 z3::expr eliminate_tmp(const Value* v, const Loop* loop, z3::context& z3ctx) {
-    if (isa<Constant>(v)) return value2z3(v, z3ctx);
+    if (isa<Constant>(v)) return value2z3(v, loop, z3ctx);
     const Instruction* ins = dyn_cast<Instruction>(v);
     const BasicBlock* bb = ins->getParent();
-    if (!loop->contains(bb)) return value2z3(v, z3ctx);
+    if (!loop->contains(bb)) return value2z3(v, loop, z3ctx);
     const BasicBlock* header = loop->getHeader();
     if (auto phi = dyn_cast<PHINode>(v) && bb == header) {
-        return value2z3(v, z3ctx);
+        return value2z3(v, loop, z3ctx);
     }
     int opcode = ins->getOpcode();
     z3::expr res(z3ctx);
     if (ins->isBinaryOp()) {
-        z3::expr op0 = value2z3(ins->getOperand(0), z3ctx);
-        z3::expr op1 = value2z3(ins->getOperand(1), z3ctx);
+        z3::expr op0 = value2z3(ins->getOperand(0), loop, z3ctx);
+        z3::expr op1 = value2z3(ins->getOperand(1), loop, z3ctx);
         if (opcode == Instruction::Add) {
             res = op0 + op1;
         } else if (opcode == Instruction::Sub) {
@@ -102,8 +125,8 @@ z3::expr eliminate_tmp(const Value* v, const Loop* loop, z3::context& z3ctx) {
         }
     } else if (auto CI = dyn_cast<ICmpInst>(v)) {
         const ICmpInst::Predicate pred = CI->getPredicate();
-        z3::expr op0 = value2z3(ins->getOperand(0), z3ctx);
-        z3::expr op1 = value2z3(ins->getOperand(1), z3ctx);
+        z3::expr op0 = value2z3(ins->getOperand(0), loop, z3ctx);
+        z3::expr op1 = value2z3(ins->getOperand(1), loop, z3ctx);
         if (ICmpInst::isLE(pred)) {
             res = op0 <= op1;
         } else if (ICmpInst::isLT(pred)) {
@@ -163,10 +186,25 @@ z3::expr_vector solve_rec(const Value* v, const LoopInfo& LI, z3::context& z3ctx
     loop_se(loop, LI, rec, initial, z3ctx);
     std::set<const PHINode*> phis;
     find_phi_in_header(v, loop, LI, phis);
-    for (auto phi : phis) {
-        errs() << initial.at(phi).to_string() << "\n";
-        errs() << rec.at(phi).to_string() << "\n";
+    std::string ind_var_name = "n" + std::to_string(loop->getLoopDepth() - 1);
+    z3::expr last_ind_var = z3ctx.int_const(ind_var_name.data());
+    std::map<z3::expr, z3::expr> rec_eqs;
+    for (auto& i : rec) {
+        rec_eqs.insert_or_assign(def2z3(i.first, LI, z3ctx), i.second);
+        // errs() << i.second.to_string() << "\n";
+        // errs() << def2z3(i.first, LI, z3ctx).to_string() << "\n";
     }
+    rec_solver rec_s(rec_eqs, last_ind_var, z3ctx);
+    rec_s.simple_solve();
+    for (auto& i : rec_s.get_res()) {
+        errs() << i.first.to_string() << " " << i.second.to_string() << "\n";
+    }
+    // exit(0);
+    // for (auto phi : phis) {
+    //     errs() << initial.at(phi).to_string() << "\n";
+    //     errs() << rec.at(phi).to_string() << "\n";
+    // }
+    // errs() << eliminate_tmp(v, loop, z3ctx).to_string() << "\n";
     return res;
     // for (auto p : phis) {
     //     for (int i = 0; i < p->getNumIncomingValues(); i++) {
@@ -578,6 +616,20 @@ void check_assertion(const Use* u, const LoopInfo& LI, const DominatorTree& DT, 
         case z3::unsat: errs() << "Correct\n"; break;
         default: errs() << "Unknown\n"; break;
     }
+}
+
+void test_solver() {
+    z3::context zctx;
+    z3::func_decl func = zctx.function("f", zctx.int_sort(), zctx.int_sort());
+    z3::expr n = zctx.int_const("n");
+    std::map<z3::expr, z3::expr> eqs;
+    eqs.insert_or_assign(func(n+1), 3*func(n) + 2);
+    rec_solver s(eqs, n, zctx);
+    s.simple_solve();
+    for (auto &i : s.get_res()) {
+        errs() << i.first.to_string() << " = " << i.second.to_string() << "\n";
+    }
+    exit(0);
 }
 
 int main(int argc, char** argv) {
