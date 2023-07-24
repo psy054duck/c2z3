@@ -32,10 +32,8 @@ define i32 @main() #0 {
 
 14:                                               ; preds = %5
   %15 = load i32, ptr %3, align 4
-  %16 = load i32, ptr %4, align 4
-  %17 = mul i32 2, %16
-  %18 = icmp eq i32 %15, %17
-  call void @assert(i1 noundef zeroext %18)
+  %16 = icmp eq i32 %15, 10000000
+  call void @assert(i1 noundef zeroext %16)
   ret i32 0
 }
 

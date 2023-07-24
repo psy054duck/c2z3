@@ -35,6 +35,16 @@ using namespace llvm;
 z3::expr_vector handle_loop(const Loop* loop, std::vector<const Value*>& visited, const LoopInfo& LI, const DominatorTree& DT, const PostDominatorTree& PDT, std::set<const Loop*> loops, std::map<Value*, z3::expr_vector>& cached, z3::context& z3ctx);
 z3::expr def2z3(const Value* v, const LoopInfo& LI, z3::context &z3ctx);
 
+std::pair<z3::expr_vector, z3::expr_vector> map2expr_vector(const std::map<z3::expr, z3::expr>& m, z3::context& z3ctx) {
+    z3::expr_vector keys(z3ctx);
+    z3::expr_vector values(z3ctx);
+    for (auto& i : m) {
+        keys.push_back(i.first);
+        values.push_back(i.second);
+    }
+    return std::make_pair(keys, values);
+}
+
 void abortWithInfo(const std::string &s) {
     errs() << s << "\n";
     abort();
@@ -176,8 +186,8 @@ void find_phi_in_header(const Value* v, const Loop* loop, const LoopInfo& LI, st
     }
 }
 
-z3::expr_vector solve_rec(const Value* v, const LoopInfo& LI, z3::context& z3ctx) {
-    z3::expr_vector res(z3ctx);
+std::map<z3::expr, z3::expr> solve_rec(const Value* v, const LoopInfo& LI, z3::context& z3ctx) {
+    std::map<z3::expr, z3::expr> res;
     const Instruction* ins = dyn_cast<Instruction>(v);
     Loop* loop = LI.getLoopFor(ins->getParent());
     if (!loop) return res;
@@ -194,12 +204,14 @@ z3::expr_vector solve_rec(const Value* v, const LoopInfo& LI, z3::context& z3ctx
         // errs() << i.second.to_string() << "\n";
         // errs() << def2z3(i.first, LI, z3ctx).to_string() << "\n";
     }
+    // errs() << as_header_phi.to_string() << "\n";
+    // errs() << "********\n";
     rec_solver rec_s(rec_eqs, last_ind_var, z3ctx);
     rec_s.simple_solve();
-    for (auto& i : rec_s.get_res()) {
-        errs() << i.first.to_string() << " " << i.second.to_string() << "\n";
-    }
-    // exit(0);
+    // for (auto& i : rec_s.get_res()) {
+    //     errs() << i.first.to_string() << " " << i.second.to_string() << "\n";
+    // }
+    res = rec_s.get_res();
     // for (auto phi : phis) {
     //     errs() << initial.at(phi).to_string() << "\n";
     //     errs() << rec.at(phi).to_string() << "\n";
@@ -453,7 +465,15 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
                 z3::expr_vector loop_ret = handle_loop(loop, visited, LI, DT, PDT, loops, cached, z3ctx);
                 combine_vec(res, loop_ret);
             }
-            solve_rec(v, LI, z3ctx);
+            std::map<z3::expr, z3::expr> closed_form = solve_rec(v, LI, z3ctx);
+            // auto keys_values = map2expr_vector(closed_form, z3ctx);
+            z3::expr as_header_phi = eliminate_tmp(v, loop, z3ctx);
+            if (closed_form.size() != 0) {
+                z3::expr inv_var = z3ctx.int_const("n0");
+                for (auto &i : closed_form) {
+                    res.push_back(z3::forall(inv_var, z3::implies(inv_var >= 0, i.first == i.second)));
+                }
+            }
         }
         unsigned opcode = inst->getOpcode();
         if (opcode == Instruction::Call) {

@@ -13,6 +13,6 @@ int main()
 		y += 4;
 	}
 	// assert(x == z);
-	assert(y == 2*z);
+	assert(y == 5000000*2);
 	return 0;
 }
