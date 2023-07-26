@@ -16,5 +16,6 @@ class rec_solver {
         void set_ind_var(z3::expr var);
         void simple_solve();
         std::map<z3::expr, z3::expr> get_res() const;
+        void expr_solve(z3::expr);
 };
 #endif

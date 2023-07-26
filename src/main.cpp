@@ -73,7 +73,10 @@ z3::expr value2z3(const Value* v, const Loop* loop, z3::context& z3ctx, bool ini
     //     std::string inv_var_name = "n" + std::to_string(depth - 1);
     //     inv_vars.push_back(z3ctx.int_const(inv_var_name.data()));
     // }
-    z3::func_decl func = z3ctx.function(v->getName().data(), args, z3ctx.int_sort());
+    const Type* vTy = v->getType();
+    bool isBoolTy = vTy->isIntegerTy(1);
+    z3::sort ret_sort = isBoolTy ? z3ctx.bool_sort() : z3ctx.int_sort();
+    z3::func_decl func = z3ctx.function(v->getName().data(), args, ret_sort);
     if (auto CI = dyn_cast<ConstantInt>(v)) {
         return z3ctx.int_val(CI->getSExtValue());
     } else if (initial) {
@@ -130,6 +133,8 @@ z3::expr eliminate_tmp(const Value* v, const Loop* loop, z3::context& z3ctx) {
             res = op0 - op1;
         } else if (opcode == Instruction::Mul) {
             res = op0 * op1;
+        } else if (opcode == Instruction::SRem || opcode == Instruction::URem) {
+            res = op0 % op1;
         } else {
             abortWithInfo(std::string("unimplemented: ") + v->getName().data());
         }
@@ -150,6 +155,13 @@ z3::expr eliminate_tmp(const Value* v, const Loop* loop, z3::context& z3ctx) {
         } else {
             abortWithInfo(std::string("unimplemented: ") + v->getName().data());
         }
+    } else if (auto CI = dyn_cast<SelectInst>(v)) {
+        const Value* cond = CI->getCondition();
+        // const Use& cond = CI->getOperandUse(0);
+        z3::expr z3cond = value2z3(cond, loop, z3ctx);
+        z3::expr op0 = value2z3(ins->getOperand(1), loop, z3ctx);
+        z3::expr op1 = value2z3(ins->getOperand(2), loop, z3ctx);
+        res = z3::ite(z3cond, op0, op1);
     } else {
         abortWithInfo(std::string("unimplemented: ") + v->getName().data());
     }
@@ -201,33 +213,14 @@ std::map<z3::expr, z3::expr> solve_rec(const Value* v, const LoopInfo& LI, z3::c
     std::map<z3::expr, z3::expr> rec_eqs;
     for (auto& i : rec) {
         rec_eqs.insert_or_assign(def2z3(i.first, LI, z3ctx), i.second);
-        // errs() << i.second.to_string() << "\n";
-        // errs() << def2z3(i.first, LI, z3ctx).to_string() << "\n";
     }
-    // errs() << as_header_phi.to_string() << "\n";
-    // errs() << "********\n";
     rec_solver rec_s(rec_eqs, last_ind_var, z3ctx);
+    // z3::expr v2expr = eliminate_tmp(v, loop, z3ctx);
+    // errs() << v2expr.to_string() << "\n";
+    // errs() << "********************\n";
     rec_s.simple_solve();
-    // for (auto& i : rec_s.get_res()) {
-    //     errs() << i.first.to_string() << " " << i.second.to_string() << "\n";
-    // }
     res = rec_s.get_res();
-    // for (auto phi : phis) {
-    //     errs() << initial.at(phi).to_string() << "\n";
-    //     errs() << rec.at(phi).to_string() << "\n";
-    // }
-    // errs() << eliminate_tmp(v, loop, z3ctx).to_string() << "\n";
     return res;
-    // for (auto p : phis) {
-    //     for (int i = 0; i < p->getNumIncomingValues(); i++) {
-    //         const BasicBlock* bb = p->getIncomingBlock(i);
-    //         if (loop->contains(bb)) {
-    //         } else {
-    //             // initial value
-    //         }
-    //     }
-    // }
-    // return res;
 }
 
 // only works for Use
@@ -307,18 +300,11 @@ z3::expr def2z3(const Value* v, const LoopInfo& LI, z3::context &z3ctx) {
         } else {
             res = z3ctx.int_val(CI->getSExtValue());
         }
-    // } else if (auto CI = dyn_cast<ICmpInst>(v)) {
-    //     res = z3ctx.bool_const(v->getName().data());
     } else {
         bool isBoolTy = vTy->isIntegerTy(1);
         z3::sort ret_sort = isBoolTy ? z3ctx.bool_sort() : z3ctx.int_sort();
         z3::func_decl func_sig = z3ctx.function(v->getName().data(), sorts, ret_sort);
         res = func_sig(args);
-        // if (isBoolTy) {
-        //     res = z3ctx.bool_const(v->getName().data());
-        // } else {
-        //     res = z3ctx.int_const(v->getName().data());
-        // }
     }
     return res.simplify();
 }
@@ -356,6 +342,8 @@ z3::expr_vector inst2z3(const Instruction* inst, const LoopInfo& LI, const Domin
             cur_expr = (lhs == operand0 - operand1);
         } else if (opcode == Instruction::Mul) {
             cur_expr = (lhs == operand0 * operand1);
+        } else if (opcode == Instruction::SRem || opcode == Instruction::URem) {
+            cur_expr = (lhs == operand0 % operand1);
         }
         res.push_back(cur_expr.simplify());
     } else if (opcode == Instruction::Select) {

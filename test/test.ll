@@ -12,29 +12,49 @@ define i32 @main() #0 {
   store i32 0, ptr %1, align 4
   store i32 0, ptr %2, align 4
   store i32 0, ptr %3, align 4
-  store i32 5000000, ptr %4, align 4
+  store i32 0, ptr %4, align 4
   br label %5
 
-5:                                                ; preds = %9, %0
-  %6 = load i32, ptr %2, align 4
-  %7 = load i32, ptr %4, align 4
-  %8 = icmp ult i32 %6, %7
-  br i1 %8, label %9, label %14
+5:                                                ; preds = %19, %0
+  %6 = load i32, ptr %4, align 4
+  %7 = icmp slt i32 %6, 100
+  br i1 %7, label %8, label %22
 
-9:                                                ; preds = %5
-  %10 = load i32, ptr %2, align 4
-  %11 = add i32 %10, 2
-  store i32 %11, ptr %2, align 4
-  %12 = load i32, ptr %3, align 4
-  %13 = add i32 %12, 4
-  store i32 %13, ptr %3, align 4
+8:                                                ; preds = %5
+  %9 = load i32, ptr %4, align 4
+  %10 = srem i32 %9, 2
+  %11 = icmp eq i32 %10, 0
+  br i1 %11, label %12, label %15
+
+12:                                               ; preds = %8
+  %13 = load i32, ptr %2, align 4
+  %14 = add nsw i32 %13, 1
+  store i32 %14, ptr %2, align 4
+  br label %18
+
+15:                                               ; preds = %8
+  %16 = load i32, ptr %3, align 4
+  %17 = add nsw i32 %16, 1
+  store i32 %17, ptr %3, align 4
+  br label %18
+
+18:                                               ; preds = %15, %12
+  br label %19
+
+19:                                               ; preds = %18
+  %20 = load i32, ptr %4, align 4
+  %21 = add nsw i32 %20, 1
+  store i32 %21, ptr %4, align 4
   br label %5, !llvm.loop !5
 
-14:                                               ; preds = %5
-  %15 = load i32, ptr %3, align 4
-  %16 = icmp eq i32 %15, 10000000
-  call void @assert(i1 noundef zeroext %16)
-  ret i32 0
+22:                                               ; preds = %5
+  %23 = load i32, ptr %2, align 4
+  %24 = load i32, ptr %3, align 4
+  %25 = add nsw i32 %23, %24
+  %26 = icmp eq i32 %25, 100
+  call void @assert(i1 noundef zeroext %26)
+  %27 = load i32, ptr %1, align 4
+  ret i32 %27
 }
 
 declare void @assert(i1 noundef zeroext) #1

@@ -102,6 +102,18 @@ void rec_solver::simple_solve() {
     }
 }
 
+void rec_solver::expr_solve(z3::expr e) {
+    std::cout << e.to_string() << std::endl;
+    z3::expr_vector all_apps(z3ctx);
+    for (auto& i : rec_eqs) {
+        z3::func_decl f = i.first.decl();
+        if (e.contains(f(ind_var))) {
+            all_apps.push_back(f(ind_var));
+            std::cout << f(ind_var).to_string() << std::endl;
+        }
+    }
+}
+
 std::map<z3::expr, z3::expr> rec_solver::get_res() const {
     return res;
 }

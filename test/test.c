@@ -5,14 +5,24 @@ extern void assert(bool);
 
 int main()
 {
-	unsigned int x = 0;
-	unsigned int y = 0;
-	unsigned int z=5000000;
-	while(x<z){	
-		x += 2;
-		y += 4;
+	int x = 0;
+	int y = 0;
+	for (int i = 0; i < 100; i++) {
+		if (i % 2 == 0) {
+			x++;
+		} else {
+			y++;
+		}
 	}
-	// assert(x == z);
-	assert(y == 5000000*2);
-	return 0;
+	assert(x + y == 100);
+	// unsigned int x = 0;
+	// unsigned int y = 10;
+	// unsigned int z=5000000;
+	// while(x<z){	
+	// 	x += 2;
+	// 	y += 5;
+	// }
+	// // assert(x == z);
+	// assert(y % 5 == 0);
+	// return 0;
 }
