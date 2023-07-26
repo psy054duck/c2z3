@@ -219,6 +219,7 @@ std::map<z3::expr, z3::expr> solve_rec(const Value* v, const LoopInfo& LI, z3::c
     // errs() << v2expr.to_string() << "\n";
     // errs() << "********************\n";
     rec_s.simple_solve();
+    rec_s.expr_solve(eliminate_tmp(v, loop, z3ctx));
     res = rec_s.get_res();
     return res;
 }
@@ -460,6 +461,17 @@ z3::expr_vector rel2z3(const Value* v, std::vector<const Value*>& visited, const
                 z3::expr inv_var = z3ctx.int_const("n0");
                 for (auto &i : closed_form) {
                     res.push_back(z3::forall(inv_var, z3::implies(inv_var >= 0, i.first == i.second)));
+                }
+                std::set<const PHINode*> phis;
+                find_phi_in_header(v, loop, LI, phis);
+                for (auto phi : phis) {
+                    for (int i = 0; i < phi->getNumIncomingValues(); i++) {
+                        if (!loop->contains(phi->getIncomingBlock(i))) {
+                            z3::expr_vector operand_expr_vec = rel2z3(phi->getIncomingValue(i), visited, LI, DT, PDT, loops, cached, z3ctx);
+                            combine_vec(res, operand_expr_vec);
+                        }
+                    }
+                return res;
                 }
             }
         }

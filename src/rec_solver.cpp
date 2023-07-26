@@ -13,10 +13,19 @@ bool is_simple_rec(z3::func_decl func_decl, z3::expr rhs) {
 
     auto args = rhs.args();
     auto kind = rhs.decl().decl_kind();
+    bool is_all_simple_rec = true;
+    for (auto e : args) {
+        if (!is_simple_rec(func_decl, e)) {
+            is_all_simple_rec = false;
+            break;
+        }
+    }
     if (kind == Z3_OP_ADD || kind == Z3_OP_MUL || kind == Z3_OP_SUB) {
-        return std::all_of(args.begin(), args.end(), [func_decl](z3::expr e) { return is_simple_rec(func_decl, e); });
+        return is_all_simple_rec;
+        // return std::all_of(args.begin(), args.end(), [func_decl](z3::expr e) { return is_simple_rec(func_decl, e); });
     } else {
-        return func_decl.id() == rhs.decl().id() && std::all_of(args.begin(), args.end(), [func_decl](z3::expr e) { return is_simple_rec(func_decl, e); });
+        return func_decl.id() == rhs.decl().id() && is_all_simple_rec;
+        // return func_decl.id() == rhs.decl().id() && std::all_of(args.begin(), args.end(), [func_decl](z3::expr e) { return is_simple_rec(func_decl, e); });
     }
     return true;
 }
@@ -107,6 +116,7 @@ void rec_solver::expr_solve(z3::expr e) {
     z3::expr_vector all_apps(z3ctx);
     for (auto& i : rec_eqs) {
         z3::func_decl f = i.first.decl();
+        std::cout << f.arity() << std::endl;
         if (e.contains(f(ind_var))) {
             all_apps.push_back(f(ind_var));
             std::cout << f(ind_var).to_string() << std::endl;

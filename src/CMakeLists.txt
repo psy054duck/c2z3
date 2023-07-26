@@ -7,6 +7,7 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 message(STATUS "Using Z3.cmake in: ${Z3_DIR}")
 # message(STATUS "Using Z3.cmake in: ${Z3_CXX_INCLUDE_DIRS}")
+set (CMAKE_CXX_STANDARD 17)
 
 # Set your project compile flags.
 # E.g. if using the C++ header files
